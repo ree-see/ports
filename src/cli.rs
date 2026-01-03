@@ -19,5 +19,8 @@ pub enum Commands {
     Kill {
         /// Port number or process name
         target: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
     },
 }
