@@ -71,6 +71,16 @@ ports kill node -f          # Force kill without confirmation
 ports kill node -a          # Kill all matching processes
 ```
 
+### Interactive mode
+
+```bash
+ports -i                    # Select a port to kill interactively
+ports -i node               # Filter by process, then select
+ports -i -p tcp             # Filter by protocol, then select
+```
+
+Use ↑/↓ or j/k to navigate, Enter to select, q to quit.
+
 ### Filter and sort
 
 ```bash
@@ -138,4 +148,7 @@ ports --json > ports.json
 
 # Watch PostgreSQL connections
 ports -w -c postgres
+
+# Interactively select and kill a port
+ports -i
 ```
