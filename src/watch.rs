@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::cli::{ProtocolFilter, SortField};
 use crate::output::{json, table};
 use crate::platform;
 use crate::types::PortInfo;
@@ -14,6 +15,8 @@ pub struct WatchOptions {
     pub json: bool,
     pub filter: Option<String>,
     pub connections: bool,
+    pub sort: Option<SortField>,
+    pub protocol: Option<ProtocolFilter>,
 }
 
 pub fn run(options: WatchOptions) -> Result<()> {
@@ -27,7 +30,9 @@ pub fn run(options: WatchOptions) -> Result<()> {
         } else {
             platform::get_listening_ports()?
         };
-        let filtered = filter_ports(ports, &options.filter);
+        let ports = PortInfo::filter_protocol(ports, options.protocol);
+        let mut filtered = filter_ports(ports, &options.filter);
+        PortInfo::sort_vec(&mut filtered, options.sort);
 
         if options.json {
             json::print_ports(&filtered);

@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "ports")]
@@ -23,8 +24,29 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub connections: bool,
 
+    /// Sort results by field
+    #[arg(short, long, value_enum, global = true)]
+    pub sort: Option<SortField>,
+
+    /// Filter by protocol
+    #[arg(short, long, value_enum, global = true)]
+    pub protocol: Option<ProtocolFilter>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum SortField {
+    Port,
+    Pid,
+    Name,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum ProtocolFilter {
+    Tcp,
+    Udp,
 }
 
 #[derive(Subcommand)]
@@ -38,5 +60,14 @@ pub enum Commands {
         /// Skip confirmation prompt
         #[arg(short, long)]
         force: bool,
+        /// Kill all matching processes (instead of erroring on multiple matches)
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
     },
 }
