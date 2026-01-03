@@ -32,6 +32,10 @@ pub struct Cli {
     #[arg(short, long, value_enum, global = true)]
     pub protocol: Option<ProtocolFilter>,
 
+    /// Interactive mode: select a port to kill
+    #[arg(short, long, global = true)]
+    pub interactive: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

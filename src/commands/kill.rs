@@ -98,7 +98,7 @@ fn confirm_kill() -> Result<bool> {
     Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
 }
 
-fn kill_process(pid: u32) -> Result<()> {
+pub fn kill_process(pid: u32) -> Result<()> {
     let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 

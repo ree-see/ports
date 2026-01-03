@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod commands;
+pub mod interactive;
 pub mod output;
 pub mod platform;
 pub mod types;
@@ -14,7 +15,13 @@ use anyhow::Result;
 use clap::CommandFactory;
 use clap_complete::generate;
 
+use types::PortInfo;
+
 pub fn run(cli: Cli) -> Result<()> {
+    if cli.interactive {
+        return run_interactive(&cli);
+    }
+
     if cli.watch {
         let filter = match &cli.command {
             Some(cli::Commands::List) => None,
@@ -55,4 +62,33 @@ pub fn run(cli: Cli) -> Result<()> {
             None => commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol),
         },
     }
+}
+
+fn run_interactive(cli: &Cli) -> Result<()> {
+    let ports = if cli.connections {
+        platform::get_connections()?
+    } else {
+        platform::get_listening_ports()?
+    };
+
+    let mut ports = PortInfo::filter_protocol(ports, cli.protocol);
+
+    if let Some(query) = &cli.query {
+        ports = if let Ok(port_num) = query.parse::<u16>() {
+            ports.into_iter().filter(|p| p.port == port_num).collect()
+        } else {
+            ports
+                .into_iter()
+                .filter(|p| {
+                    p.process_name
+                        .to_lowercase()
+                        .contains(&query.to_lowercase())
+                })
+                .collect()
+        };
+    }
+
+    PortInfo::sort_vec(&mut ports, cli.sort);
+
+    interactive::select_and_kill(&ports)
 }
