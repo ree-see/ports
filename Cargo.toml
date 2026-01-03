@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Modern cross-platform port inspector"
 license = "MIT"
+repository = "https://github.com/ree-see/ports"
+readme = "README.md"
+keywords = ["cli", "network", "ports", "netstat", "lsof"]
+categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 listeners = "0.3"
