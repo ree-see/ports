@@ -25,15 +25,16 @@ pub fn run(cli: Cli) -> Result<()> {
             interval: Duration::from_secs_f64(cli.interval),
             json: cli.json,
             filter,
+            connections: cli.connections,
         });
     }
 
     match &cli.command {
-        Some(cli::Commands::List) => commands::list::execute(cli.json),
+        Some(cli::Commands::List) => commands::list::execute(cli.json, cli.connections),
         Some(cli::Commands::Kill { target, force }) => commands::kill::execute(target, *force),
         None => match &cli.query {
-            Some(query) => commands::query::execute(query, cli.json),
-            None => commands::list::execute(cli.json),
+            Some(query) => commands::query::execute(query, cli.json, cli.connections),
+            None => commands::list::execute(cli.json, cli.connections),
         },
     }
 }

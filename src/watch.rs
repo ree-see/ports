@@ -13,6 +13,7 @@ pub struct WatchOptions {
     pub interval: Duration,
     pub json: bool,
     pub filter: Option<String>,
+    pub connections: bool,
 }
 
 pub fn run(options: WatchOptions) -> Result<()> {
@@ -21,7 +22,11 @@ pub fn run(options: WatchOptions) -> Result<()> {
     loop {
         clear_screen();
 
-        let ports = platform::get_listening_ports()?;
+        let ports = if options.connections {
+            platform::get_connections()?
+        } else {
+            platform::get_listening_ports()?
+        };
         let filtered = filter_ports(ports, &options.filter);
 
         if options.json {
@@ -35,7 +40,7 @@ pub fn run(options: WatchOptions) -> Result<()> {
             table::print_ports_watch(&filtered, &new_ports);
         }
 
-        print_watch_status(&options.interval);
+        print_watch_status(&options);
         io::stdout().flush()?;
 
         previous = filtered.into_iter().collect();
@@ -67,11 +72,17 @@ fn clear_screen() {
     print!("\x1B[2J\x1B[1;1H");
 }
 
-fn print_watch_status(interval: &Duration) {
+fn print_watch_status(options: &WatchOptions) {
     use colored::Colorize;
+    let mode = if options.connections {
+        "connections"
+    } else {
+        "listening"
+    };
     println!(
-        "\n{} (every {:.1}s, Ctrl+C to exit)",
-        "Watching...".dimmed(),
-        interval.as_secs_f64()
+        "\n{} {} (every {:.1}s, Ctrl+C to exit)",
+        "Watching".dimmed(),
+        mode.dimmed(),
+        options.interval.as_secs_f64()
     );
 }

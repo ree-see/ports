@@ -3,8 +3,12 @@ use anyhow::Result;
 use crate::output::{json, table};
 use crate::platform;
 
-pub fn execute(output_json: bool) -> Result<()> {
-    let ports = platform::get_listening_ports()?;
+pub fn execute(output_json: bool, connections: bool) -> Result<()> {
+    let ports = if connections {
+        platform::get_connections()?
+    } else {
+        platform::get_listening_ports()?
+    };
 
     if output_json {
         json::print_ports(&ports);

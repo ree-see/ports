@@ -3,8 +3,12 @@ use anyhow::Result;
 use crate::output::{json, table};
 use crate::platform;
 
-pub fn execute(query: &str, output_json: bool) -> Result<()> {
-    let ports = platform::get_listening_ports()?;
+pub fn execute(query: &str, output_json: bool, connections: bool) -> Result<()> {
+    let ports = if connections {
+        platform::get_connections()?
+    } else {
+        platform::get_listening_ports()?
+    };
 
     let filtered: Vec<_> = if let Ok(port_num) = query.parse::<u16>() {
         ports.into_iter().filter(|p| p.port == port_num).collect()

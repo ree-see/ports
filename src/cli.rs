@@ -19,6 +19,10 @@ pub struct Cli {
     #[arg(short = 'n', long, default_value = "1", global = true)]
     pub interval: f64,
 
+    /// Show established connections instead of listening ports
+    #[arg(short, long, global = true)]
+    pub connections: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

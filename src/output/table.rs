@@ -15,7 +15,7 @@ pub fn print_ports_watch(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
 
 fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
     if ports.is_empty() {
-        println!("{}", "No listening ports found".yellow());
+        println!("{}", "No results found".yellow());
         return;
     }
 
@@ -39,10 +39,10 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
     
     let count_str = ports.len().to_string();
     if new_ports.is_empty() {
-        println!("\n{} listening port(s) found", count_str.green());
+        println!("\n{} result(s)", count_str.green());
     } else {
         println!(
-            "\n{} listening port(s) found ({} new)",
+            "\n{} result(s) ({} new)",
             count_str.green(),
             new_ports.len().to_string().green().bold()
         );
