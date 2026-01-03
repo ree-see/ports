@@ -19,20 +19,41 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
         return;
     }
 
+    let has_remote = ports.iter().any(|p| p.remote_address.is_some());
+
     let mut table = Table::new();
-    table.set_header(vec!["PORT", "PROTO", "PID", "PROCESS", "ADDRESS"]);
+    if has_remote {
+        table.set_header(vec!["PORT", "PROTO", "PID", "PROCESS", "LOCAL", "REMOTE"]);
+    } else {
+        table.set_header(vec!["PORT", "PROTO", "PID", "PROCESS", "ADDRESS"]);
+    }
 
     for port in ports {
         let is_new = new_ports.contains(port);
         let row_color = if is_new { Color::Green } else { Color::Reset };
+        let proto_color = if is_new {
+            Color::Green
+        } else {
+            match port.protocol {
+                crate::types::Protocol::Tcp => Color::Cyan,
+                crate::types::Protocol::Udp => Color::Magenta,
+            }
+        };
 
-        table.add_row(vec![
+        let mut row = vec![
             Cell::new(port.port).fg(if is_new { Color::Green } else { Color::Cyan }),
-            Cell::new(port.protocol).fg(row_color),
+            Cell::new(port.protocol).fg(proto_color),
             Cell::new(port.pid).fg(row_color),
             Cell::new(&port.process_name).fg(row_color),
             Cell::new(&port.address).fg(row_color),
-        ]);
+        ];
+
+        if has_remote {
+            let remote = port.remote_address.as_deref().unwrap_or("-");
+            row.push(Cell::new(remote).fg(row_color));
+        }
+
+        table.add_row(row);
     }
 
     println!("{table}");
