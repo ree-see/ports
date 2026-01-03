@@ -20,7 +20,7 @@ fn parse_lsof_output(output: &str) -> Vec<PortInfo> {
         .lines()
         .skip(1)
         .filter_map(parse_lsof_line)
-        .filter(|info| info.address.contains("->"))
+        .filter(|info| info.remote_address.is_some())
         .collect()
 }
 
@@ -48,12 +48,19 @@ fn parse_lsof_line(line: &str) -> Option<PortInfo> {
 
     let port = extract_local_port(name)?;
 
+    let (local_addr, remote_address) = if let Some((local, remote)) = name.split_once("->") {
+        (local.to_string(), Some(remote.to_string()))
+    } else {
+        (name.to_string(), None)
+    };
+
     Some(PortInfo {
         port,
         protocol,
         pid,
         process_name: command.to_string(),
-        address: name.to_string(),
+        address: local_addr,
+        remote_address,
     })
 }
 
@@ -82,7 +89,8 @@ mod tests {
         assert_eq!(result.pid, 12345);
         assert_eq!(result.port, 3000);
         assert_eq!(result.protocol, Protocol::Tcp);
-        assert!(result.address.contains("->"));
+        assert_eq!(result.address, "127.0.0.1:3000");
+        assert_eq!(result.remote_address, Some("192.168.1.5:54321".to_string()));
     }
 
     #[test]
@@ -92,7 +100,7 @@ mod tests {
         let result = parse_lsof_line(line).unwrap();
         
         assert_eq!(result.port, 3000);
-        assert!(!result.address.contains("->"));
+        assert!(result.remote_address.is_none());
     }
 
     #[test]
@@ -104,7 +112,7 @@ node      12345 user   24u  IPv4 0x456      0t0  TCP *:3000 (LISTEN)";
         let result = parse_lsof_output(output);
         
         assert_eq!(result.len(), 1);
-        assert!(result[0].address.contains("->"));
+        assert!(result[0].remote_address.is_some());
     }
 
     #[test]

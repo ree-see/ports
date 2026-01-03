@@ -78,12 +78,19 @@ fn get_ports(mode: FilterMode) -> Result<Vec<PortInfo>> {
                 }
 
                 if let Some(process_info) = inode_map.get(&socket.inode) {
+                    let remote = if is_remote_zero(&socket) {
+                        None
+                    } else {
+                        Some(format!("{}:{}", socket.remote_addr, socket.remote_port))
+                    };
+
                     ports.push(PortInfo {
                         port: socket.local_port,
                         protocol,
                         pid: process_info.pid,
                         process_name: process_info.name.clone(),
                         address: format!("{}:{}", socket.local_addr, socket.local_port),
+                        remote_address: remote,
                     });
                 }
             }

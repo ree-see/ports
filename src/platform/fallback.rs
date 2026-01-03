@@ -17,6 +17,7 @@ pub fn get_listening_ports() -> anyhow::Result<Vec<crate::types::PortInfo>> {
             pid: l.process.pid,
             process_name: l.process.name.clone(),
             address: l.socket.to_string(),
+            remote_address: None,
         })
         .collect();
 
