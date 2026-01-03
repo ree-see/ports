@@ -1,6 +1,8 @@
 use std::fmt;
 
-#[derive(Debug, Clone)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
 pub struct PortInfo {
     pub port: u16,
     pub protocol: Protocol,
@@ -9,7 +11,8 @@ pub struct PortInfo {
     pub address: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Tcp,
     Udp,

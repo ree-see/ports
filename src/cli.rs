@@ -7,6 +7,10 @@ pub struct Cli {
     /// Port number or process name to query
     pub query: Option<String>,
 
+    /// Output as JSON
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

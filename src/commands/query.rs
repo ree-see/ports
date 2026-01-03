@@ -1,9 +1,9 @@
 use anyhow::Result;
 
-use crate::output::table;
+use crate::output::{json, table};
 use crate::platform;
 
-pub fn execute(query: &str) -> Result<()> {
+pub fn execute(query: &str, output_json: bool) -> Result<()> {
     let ports = platform::get_listening_ports()?;
 
     let filtered: Vec<_> = if let Ok(port_num) = query.parse::<u16>() {
@@ -19,6 +19,11 @@ pub fn execute(query: &str) -> Result<()> {
             .collect()
     };
 
-    table::print_ports(&filtered);
+    if output_json {
+        json::print_ports(&filtered);
+    } else {
+        table::print_ports(&filtered);
+    }
+
     Ok(())
 }
