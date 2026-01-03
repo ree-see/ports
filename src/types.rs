@@ -1,3 +1,5 @@
+//! Core data types for port information.
+
 use std::fmt;
 
 use serde::Serialize;

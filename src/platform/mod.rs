@@ -1,3 +1,7 @@
+//! Platform-specific port enumeration.
+//!
+//! Uses native `/proc/net` parsing on Linux, `lsof` on macOS.
+
 use anyhow::Result;
 
 use crate::types::PortInfo;

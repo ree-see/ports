@@ -1,3 +1,24 @@
+//! # ports
+//!
+//! Modern cross-platform port inspector. A clean replacement for `ss`, `netstat`, and `lsof`.
+//!
+//! ## Features
+//!
+//! - List listening ports (TCP/UDP, IPv4/IPv6)
+//! - Show established connections
+//! - Filter by port number, process name, or protocol
+//! - Kill processes by port or name
+//! - Interactive selection mode
+//! - Watch mode with live updates
+//! - JSON output for scripting
+//! - Shell completions (bash, zsh, fish)
+//!
+//! ## Platform Support
+//!
+//! - **Linux**: Native `/proc/net` parsing for TCP, TCP6, UDP, UDP6
+//! - **macOS**: Uses `lsof` for connections, `listeners` crate for listening ports
+//! - **Others**: Generic fallback via `listeners` crate
+
 pub mod cli;
 pub mod commands;
 pub mod interactive;
