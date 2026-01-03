@@ -11,6 +11,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Watch mode: refresh continuously
+    #[arg(short, long, global = true)]
+    pub watch: bool,
+
+    /// Refresh interval in seconds (default: 1)
+    #[arg(short = 'n', long, default_value = "1", global = true)]
+    pub interval: f64,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
