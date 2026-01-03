@@ -7,7 +7,7 @@ use sysinfo::{Pid, Signal, System};
 use crate::platform;
 use crate::types::PortInfo;
 
-pub fn execute(target: &str, force: bool) -> Result<()> {
+pub fn execute(target: &str, force: bool, all: bool) -> Result<()> {
     let ports = platform::get_listening_ports()?;
 
     let matches: Vec<_> = if let Ok(port_num) = target.parse::<u16>() {
@@ -29,7 +29,7 @@ pub fn execute(target: &str, force: bool) -> Result<()> {
 
     let grouped = group_by_pid(&matches);
 
-    if grouped.len() > 1 {
+    if grouped.len() > 1 && !all {
         eprintln!("Multiple processes found:");
         for (pid, infos) in &grouped {
             let ports: Vec<_> = infos.iter().map(|p| p.port.to_string()).collect();
@@ -40,27 +40,40 @@ pub fn execute(target: &str, force: bool) -> Result<()> {
                 ports.join(", ")
             );
         }
-        bail!("Specify a more specific target or use a port number");
+        bail!("Specify a more specific target, use a port number, or use --all");
     }
 
-    let (pid, infos) = grouped.into_iter().next().unwrap();
-    let process_name = &infos[0].process_name;
-    let ports: Vec<_> = infos.iter().map(|p| p.port.to_string()).collect();
+    for (pid, infos) in &grouped {
+        let process_name = &infos[0].process_name;
+        let port_list: Vec<_> = infos.iter().map(|p| p.port.to_string()).collect();
 
-    eprintln!(
-        "PID {} ({}) listening on: {}",
-        pid,
-        process_name,
-        ports.join(", ")
-    );
+        eprintln!(
+            "PID {} ({}) listening on: {}",
+            pid,
+            process_name,
+            port_list.join(", ")
+        );
+    }
 
     if !force && !confirm_kill()? {
         eprintln!("Aborted.");
         return Ok(());
     }
 
-    kill_process(pid)?;
-    eprintln!("Killed PID {}", pid);
+    let mut killed = 0;
+    for (pid, _) in grouped {
+        match kill_process(pid) {
+            Ok(()) => {
+                eprintln!("Killed PID {}", pid);
+                killed += 1;
+            }
+            Err(e) => eprintln!("Failed to kill PID {}: {}", pid, e),
+        }
+    }
+
+    if killed == 0 {
+        bail!("Failed to kill any processes");
+    }
 
     Ok(())
 }
