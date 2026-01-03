@@ -5,7 +5,7 @@ Modern cross-platform port inspector in Rust. Clean replacement for `ss`, `netst
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/ports
+git clone https://github.com/ree-see/ports
 cd ports
 cargo install --path .
 ```
