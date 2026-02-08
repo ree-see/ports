@@ -5,6 +5,7 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::cli::{ProtocolFilter, SortField};
+use crate::docker;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct PortInfo {
@@ -15,6 +16,9 @@ pub struct PortInfo {
     pub address: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_address: Option<String>,
+    /// Container name if this port is forwarded by Docker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
 }
 
 impl PortInfo {
@@ -37,6 +41,34 @@ impl PortInfo {
                 ports.into_iter().filter(|p| p.protocol == Protocol::Udp).collect()
             }
         }
+    }
+
+    /// Enrich ports with Docker container information.
+    /// 
+    /// For ports forwarded by `docker-proxy`, adds the container name.
+    pub fn enrich_with_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
+        // Only fetch Docker info if we have docker-proxy entries
+        let has_docker_proxy = ports.iter().any(|p| p.process_name.contains("docker-proxy"));
+        if !has_docker_proxy {
+            return ports;
+        }
+
+        let mappings = docker::get_port_mappings();
+        if mappings.is_empty() {
+            return ports;
+        }
+
+        ports
+            .into_iter()
+            .map(|mut p| {
+                if p.process_name.contains("docker-proxy") {
+                    if let Some(container) = mappings.get(&p.port) {
+                        p.container = Some(container.name.clone());
+                    }
+                }
+                p
+            })
+            .collect()
     }
 }
 

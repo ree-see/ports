@@ -91,6 +91,7 @@ fn get_ports(mode: FilterMode) -> Result<Vec<PortInfo>> {
                         process_name: process_info.name.clone(),
                         address: format!("{}:{}", socket.local_addr, socket.local_port),
                         remote_address: remote,
+                        container: None,
                     });
                 }
             }

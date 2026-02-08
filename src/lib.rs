@@ -21,6 +21,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod docker;
 pub mod interactive;
 pub mod output;
 pub mod platform;
@@ -92,18 +93,24 @@ fn run_interactive(cli: &Cli) -> Result<()> {
         platform::get_listening_ports()?
     };
 
-    let mut ports = PortInfo::filter_protocol(ports, cli.protocol);
+    let ports = PortInfo::filter_protocol(ports, cli.protocol);
+    // Enrich docker-proxy entries with container names
+    let mut ports = PortInfo::enrich_with_docker(ports);
 
     if let Some(query) = &cli.query {
+        let query_lower = query.to_lowercase();
         ports = if let Ok(port_num) = query.parse::<u16>() {
             ports.into_iter().filter(|p| p.port == port_num).collect()
         } else {
             ports
                 .into_iter()
                 .filter(|p| {
-                    p.process_name
-                        .to_lowercase()
-                        .contains(&query.to_lowercase())
+                    // Match process name or container name
+                    p.process_name.to_lowercase().contains(&query_lower)
+                        || p.container
+                            .as_ref()
+                            .map(|c| c.to_lowercase().contains(&query_lower))
+                            .unwrap_or(false)
                 })
                 .collect()
         };

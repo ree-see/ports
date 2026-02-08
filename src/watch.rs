@@ -31,6 +31,8 @@ pub fn run(options: WatchOptions) -> Result<()> {
             platform::get_listening_ports()?
         };
         let ports = PortInfo::filter_protocol(ports, options.protocol);
+        // Enrich docker-proxy entries with container names
+        let ports = PortInfo::enrich_with_docker(ports);
         let mut filtered = filter_ports(ports, &options.filter);
         PortInfo::sort_vec(&mut filtered, options.sort);
 
@@ -57,15 +59,19 @@ fn filter_ports(ports: Vec<PortInfo>, filter: &Option<String>) -> Vec<PortInfo> 
     match filter {
         None => ports,
         Some(query) => {
+            let query_lower = query.to_lowercase();
             if let Ok(port_num) = query.parse::<u16>() {
                 ports.into_iter().filter(|p| p.port == port_num).collect()
             } else {
                 ports
                     .into_iter()
                     .filter(|p| {
-                        p.process_name
-                            .to_lowercase()
-                            .contains(&query.to_lowercase())
+                        // Match process name or container name
+                        p.process_name.to_lowercase().contains(&query_lower)
+                            || p.container
+                                .as_ref()
+                                .map(|c| c.to_lowercase().contains(&query_lower))
+                                .unwrap_or(false)
                     })
                     .collect()
             }

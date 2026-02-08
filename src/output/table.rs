@@ -20,13 +20,22 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
     }
 
     let has_remote = ports.iter().any(|p| p.remote_address.is_some());
+    let has_container = ports.iter().any(|p| p.container.is_some());
 
     let mut table = Table::new();
-    if has_remote {
-        table.set_header(vec!["PORT", "PROTO", "PID", "PROCESS", "LOCAL", "REMOTE"]);
-    } else {
-        table.set_header(vec!["PORT", "PROTO", "PID", "PROCESS", "ADDRESS"]);
+    
+    // Build header based on what columns we need
+    let mut headers = vec!["PORT", "PROTO", "PID", "PROCESS"];
+    if has_container {
+        headers.push("CONTAINER");
     }
+    if has_remote {
+        headers.push("LOCAL");
+        headers.push("REMOTE");
+    } else {
+        headers.push("ADDRESS");
+    }
+    table.set_header(headers);
 
     for port in ports {
         let is_new = new_ports.contains(port);
@@ -45,8 +54,20 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
             Cell::new(port.protocol).fg(proto_color),
             Cell::new(port.pid).fg(row_color),
             Cell::new(&port.process_name).fg(row_color),
-            Cell::new(&port.address).fg(row_color),
         ];
+
+        if has_container {
+            let container = port.container.as_deref().unwrap_or("-");
+            // Containers get yellow color for visibility
+            let container_color = if port.container.is_some() && !is_new {
+                Color::Yellow
+            } else {
+                row_color
+            };
+            row.push(Cell::new(container).fg(container_color));
+        }
+
+        row.push(Cell::new(&port.address).fg(row_color));
 
         if has_remote {
             let remote = port.remote_address.as_deref().unwrap_or("-");

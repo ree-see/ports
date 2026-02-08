@@ -61,6 +61,7 @@ fn parse_lsof_line(line: &str) -> Option<PortInfo> {
         process_name: command.to_string(),
         address: local_addr,
         remote_address,
+        container: None,
     })
 }
 
