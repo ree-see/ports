@@ -81,6 +81,32 @@ ports -i -p tcp             # Filter by protocol, then select
 
 Use ↑/↓ or j/k to navigate, Enter to select, q to quit.
 
+### Docker container awareness
+
+When ports are forwarded by Docker, `ports` automatically shows which container they map to:
+
+```bash
+ports
+```
+
+```
+┌──────┬───────┬──────┬──────────────┬───────────────┬──────────────┐
+│ PORT │ PROTO │ PID  │ PROCESS      │ CONTAINER     │ ADDRESS      │
+├──────┼───────┼──────┼──────────────┼───────────────┼──────────────┤
+│ 80   │ tcp   │ 1234 │ docker-proxy │ nginx-prod    │ 0.0.0.0:80   │
+│ 443  │ tcp   │ 1234 │ docker-proxy │ nginx-prod    │ 0.0.0.0:443  │
+│ 5432 │ tcp   │ 5678 │ docker-proxy │ postgres-db   │ 0.0.0.0:5432 │
+│ 3000 │ tcp   │ 9012 │ node         │ -             │ 127.0.0.1    │
+└──────┴───────┴──────┴──────────────┴───────────────┴──────────────┘
+```
+
+You can also query by container name:
+
+```bash
+ports nginx         # Find all ports for nginx containers
+ports postgres-db   # Find specific container
+```
+
 ### Filter and sort
 
 ```bash
