@@ -49,13 +49,41 @@ fn get_process_sockets(pid: u32) -> Result<ProcessSockets> {
     Ok(ProcessSockets { name, inodes })
 }
 
+/// Known interpreters where comm name is more informative than binary name
+const INTERPRETERS: &[&str] = &[
+    "node", "python", "python3", "ruby", "perl", "php", "java", "bash", "sh", "zsh",
+];
+
 fn read_process_name(pid: u32) -> Result<String> {
+    // Try exe symlink first for the full binary name (comm is limited to 15 chars)
+    let exe_path = format!("/proc/{}/exe", pid);
+    let exe_name = fs::read_link(&exe_path).ok().and_then(|exe| {
+        exe.file_name().and_then(|name| {
+            let name = name.to_string_lossy();
+            if name.contains("(deleted)") || name.is_empty() {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+    });
+
+    // Read comm for comparison
     let comm_path = format!("/proc/{}/comm", pid);
-    let name = fs::read_to_string(&comm_path)
-        .context("Failed to read comm")?
-        .trim()
-        .to_string();
-    Ok(name)
+    let comm_name = fs::read_to_string(&comm_path)
+        .ok()
+        .map(|s| s.trim().to_string());
+
+    match (exe_name, comm_name) {
+        // If exe is an interpreter, prefer comm (e.g., "node" -> "openclaw-gatewa")
+        (Some(exe), Some(comm)) if INTERPRETERS.contains(&exe.as_str()) => Ok(comm),
+        // Otherwise use exe (full name, no 15 char limit)
+        (Some(exe), _) => Ok(exe),
+        // Fall back to comm
+        (None, Some(comm)) => Ok(comm),
+        // Last resort
+        (None, None) => anyhow::bail!("Could not read process name"),
+    }
 }
 
 fn read_socket_inodes(pid: u32) -> Result<Vec<u64>> {
