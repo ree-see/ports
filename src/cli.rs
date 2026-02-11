@@ -68,6 +68,12 @@ pub enum Commands {
         #[arg(short, long)]
         all: bool,
     },
+    /// Interactive real-time view (like htop for ports)
+    Top {
+        /// Show connections instead of listening ports
+        #[arg(short, long)]
+        connections: bool,
+    },
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for

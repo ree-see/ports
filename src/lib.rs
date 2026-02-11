@@ -25,6 +25,7 @@ pub mod docker;
 pub mod interactive;
 pub mod output;
 pub mod platform;
+pub mod top;
 pub mod types;
 pub mod watch;
 
@@ -53,6 +54,9 @@ pub fn run(cli: Cli) -> Result<()> {
             Some(cli::Commands::Completions { .. }) => {
                 anyhow::bail!("Cannot use --watch with completions command");
             }
+            Some(cli::Commands::Top { .. }) => {
+                anyhow::bail!("Cannot use --watch with top command (top has its own refresh)");
+            }
             None => cli.query.clone(),
         };
 
@@ -72,6 +76,9 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(cli::Commands::Kill { target, force, all }) => {
             commands::kill::execute(target, *force, *all)
+        }
+        Some(cli::Commands::Top { connections }) => {
+            top::run(*connections)
         }
         Some(cli::Commands::Completions { shell }) => {
             generate(*shell, &mut Cli::command(), "ports", &mut io::stdout());
