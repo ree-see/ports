@@ -22,6 +22,7 @@
 pub mod cli;
 pub mod commands;
 pub mod docker;
+pub mod history;
 pub mod interactive;
 pub mod output;
 pub mod platform;
@@ -57,6 +58,9 @@ pub fn run(cli: Cli) -> Result<()> {
             Some(cli::Commands::Top { .. }) => {
                 anyhow::bail!("Cannot use --watch with top command (top has its own refresh)");
             }
+            Some(cli::Commands::History { .. }) => {
+                anyhow::bail!("Cannot use --watch with history command");
+            }
             None => cli.query.clone(),
         };
 
@@ -83,6 +87,25 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(cli::Commands::Completions { shell }) => {
             generate(*shell, &mut Cli::command(), "ports", &mut io::stdout());
             Ok(())
+        }
+        Some(cli::Commands::History { action }) => {
+            match action {
+                cli::HistoryAction::Record { connections } => {
+                    commands::history::record(*connections, cli.json)
+                }
+                cli::HistoryAction::Show { port, process, hours, limit } => {
+                    commands::history::show(*port, process.clone(), Some(*hours), *limit, cli.json)
+                }
+                cli::HistoryAction::Timeline { port, hours } => {
+                    commands::history::timeline(*port, *hours, cli.json)
+                }
+                cli::HistoryAction::Stats => {
+                    commands::history::stats(cli.json)
+                }
+                cli::HistoryAction::Clean { keep } => {
+                    commands::history::cleanup(*keep, cli.json)
+                }
+            }
         }
         None => match &cli.query {
             Some(query) => {

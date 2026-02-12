@@ -80,4 +80,50 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Track port usage over time
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum HistoryAction {
+    /// Record current port state (run periodically via cron)
+    Record {
+        /// Include established connections (not just listening ports)
+        #[arg(short, long)]
+        connections: bool,
+    },
+    /// Show recorded history
+    Show {
+        /// Filter by port number
+        #[arg(long)]
+        port: Option<u16>,
+        /// Filter by process name
+        #[arg(short = 'P', long)]
+        process: Option<String>,
+        /// Hours of history to show (default: 24)
+        #[arg(short = 'H', long, default_value = "24")]
+        hours: i64,
+        /// Maximum entries to show
+        #[arg(short, long, default_value = "100")]
+        limit: usize,
+    },
+    /// Show timeline for a specific port
+    Timeline {
+        /// Port number to show timeline for
+        port: u16,
+        /// Hours of history (default: 24)
+        #[arg(short = 'H', long, default_value = "24")]
+        hours: i64,
+    },
+    /// Show statistics about recorded history
+    Stats,
+    /// Clean up old history entries
+    Clean {
+        /// Hours of history to keep (default: 168 = 1 week)
+        #[arg(short, long, default_value = "168")]
+        keep: i64,
+    },
 }

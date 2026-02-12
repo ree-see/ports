@@ -81,6 +81,44 @@ ports -i -p tcp             # Filter by protocol, then select
 
 Use ↑/↓ or j/k to navigate, Enter to select, q to quit.
 
+### Real-time TUI (htop for ports)
+
+```bash
+ports top                   # Interactive real-time view
+ports top -c                # Show connections instead of listening ports
+```
+
+Controls:
+- `Tab` - Toggle between listening/connections mode
+- `p`/`i`/`n` - Sort by port/pid/name
+- `↑`/`↓`/`j`/`k` - Navigate
+- `PgUp`/`PgDn` - Page navigation
+- `q` - Quit
+
+New ports are highlighted green for 3 seconds.
+
+### Port usage history
+
+Track port usage over time with SQLite-backed history:
+
+```bash
+ports history record        # Take a snapshot (run via cron)
+ports history record -c     # Include established connections
+ports history show          # View recent history
+ports history show --port 80 --hours 48
+ports history timeline 22   # Timeline for specific port
+ports history stats         # Database statistics
+ports history clean --keep 168  # Keep only 1 week (hours)
+```
+
+Example cron job for continuous monitoring:
+```bash
+# Record port state every 5 minutes
+*/5 * * * * /usr/local/bin/ports history record
+```
+
+History data is stored in `~/.local/share/ports/ports_history.db`.
+
 ### Docker container awareness
 
 When ports are forwarded by Docker, `ports` automatically shows which container they map to:
