@@ -1,14 +1,21 @@
-# ports
+# portls
 
 Modern cross-platform port inspector in Rust. Clean replacement for `ss`, `netstat`, and `lsof`.
 
 ## Installation
 
 ```bash
+cargo install portls
+```
+
+Or build from source:
+```bash
 git clone https://github.com/ree-see/ports
 cd ports
 cargo install --path .
 ```
+
+This installs the `ports` command.
 
 ## Usage
 
