@@ -2,6 +2,6 @@ use anyhow::Result;
 use clap::Parser;
 
 fn main() -> Result<()> {
-    let cli = ports::Cli::parse();
-    ports::run(cli)
+    let cli = portls::Cli::parse();
+    portls::run(cli)
 }
