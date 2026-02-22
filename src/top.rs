@@ -1,19 +1,20 @@
-//! Interactive real-time port viewer (htop-style).
+//! Interactive real-time port viewer (htop-style), built on ratatui.
 
 use std::collections::HashMap;
-use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::{
-    cursor::{Hide, MoveTo, Show},
-    event::{self, Event, KeyCode, KeyModifiers},
-    execute,
-    style::{Color, Print, ResetColor, SetForegroundColor},
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState};
+use ratatui::Terminal;
 
 use crate::cli::SortField;
+use crate::commands::kill::kill_process;
 use crate::platform;
 use crate::types::{PortInfo, Protocol};
 
@@ -28,8 +29,12 @@ struct TopState {
     sort: SortField,
     scroll_offset: usize,
     selected: usize,
-    /// Track which ports we've seen before (for highlighting new ones)
+    /// Track which ports we've seen before (for highlighting new ones).
     seen_ports: HashMap<(u16, Protocol, u32), Instant>,
+    /// When true, show kill confirmation overlay.
+    confirm_kill: bool,
+    /// Transient message shown in header (e.g. "Killed PID 1234").
+    status_msg: Option<(String, Instant)>,
 }
 
 impl TopState {
@@ -44,100 +49,162 @@ impl TopState {
             scroll_offset: 0,
             selected: 0,
             seen_ports: HashMap::new(),
+            confirm_kill: false,
+            status_msg: None,
         }
     }
 }
 
 pub fn run(connections: bool) -> Result<()> {
-    let mut stdout = io::stdout();
+    crossterm::terminal::enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::cursor::Hide)?;
 
-    // Enter alternate screen and hide cursor
-    execute!(stdout, EnterAlternateScreen, Hide)?;
-    terminal::enable_raw_mode()?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-    let result = run_loop(&mut stdout, connections);
+    let result = run_loop(&mut terminal, connections);
 
-    // Cleanup
-    terminal::disable_raw_mode()?;
-    execute!(stdout, Show, LeaveAlternateScreen)?;
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::cursor::Show
+    )?;
 
     result
 }
 
-fn run_loop(stdout: &mut io::Stdout, connections: bool) -> Result<()> {
+fn run_loop(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>, connections: bool) -> Result<()> {
     let mut state = TopState::new(connections);
     let poll_timeout = Duration::from_millis(100);
+    let refresh_interval = Duration::from_secs(1);
+    let mut last_refresh = Instant::now().checked_sub(refresh_interval).unwrap_or_else(Instant::now);
+    let mut ports: Vec<PortInfo> = Vec::new();
+    let new_threshold = Duration::from_secs(3);
+    let status_display_duration = Duration::from_secs(3);
 
     loop {
-        // Fetch current data
-        let ports = fetch_ports(&state)?;
-
-        // Mark new ports
         let now = Instant::now();
-        let new_threshold = Duration::from_secs(3);
 
-        // Render
-        render(stdout, &state, &ports, now, new_threshold)?;
-
-        // Update seen ports
-        for p in &ports {
-            let key = (p.port, p.protocol, p.pid);
-            state.seen_ports.entry(key).or_insert(now);
+        // Refresh data every second
+        if now.duration_since(last_refresh) >= refresh_interval {
+            ports = fetch_ports(&state)?;
+            // Update seen_ports: insert any port not yet tracked
+            for p in &ports {
+                let key = (p.port, p.protocol, p.pid);
+                state.seen_ports.entry(key).or_insert(now);
+            }
+            last_refresh = now;
         }
 
-        // Handle input
-        if event::poll(poll_timeout)? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-
-                    // Toggle mode
-                    KeyCode::Tab => {
-                        state.mode = match state.mode {
-                            ViewMode::Listening => ViewMode::Connections,
-                            ViewMode::Connections => ViewMode::Listening,
-                        };
-                        state.scroll_offset = 0;
-                        state.selected = 0;
-                    }
-
-                    // Sort
-                    KeyCode::Char('p') => state.sort = SortField::Port,
-                    KeyCode::Char('i') => state.sort = SortField::Pid,
-                    KeyCode::Char('n') => state.sort = SortField::Name,
-
-                    // Navigation
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if state.selected > 0 {
-                            state.selected -= 1;
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if state.selected < ports.len().saturating_sub(1) {
-                            state.selected += 1;
-                        }
-                    }
-                    KeyCode::PageUp => {
-                        let (_, height) = terminal::size()?;
-                        let visible = (height as usize).saturating_sub(8);
-                        state.selected = state.selected.saturating_sub(visible);
-                    }
-                    KeyCode::PageDown => {
-                        let (_, height) = terminal::size()?;
-                        let visible = (height as usize).saturating_sub(8);
-                        state.selected = (state.selected + visible).min(ports.len().saturating_sub(1));
-                    }
-                    KeyCode::Home => state.selected = 0,
-                    KeyCode::End => state.selected = ports.len().saturating_sub(1),
-
-                    _ => {}
-                }
+        // Clear expired status messages
+        if let Some((_, ts)) = &state.status_msg {
+            if now.duration_since(*ts) >= status_display_duration {
+                state.status_msg = None;
             }
         }
 
-        // Small sleep to avoid busy-waiting
-        std::thread::sleep(Duration::from_millis(50));
+        // Clamp selection
+        let max_sel = ports.len().saturating_sub(1);
+        if state.selected > max_sel {
+            state.selected = max_sel;
+        }
+
+        // Draw
+        let now = Instant::now(); // refresh after potential data fetch
+        terminal.draw(|frame| {
+            draw(frame, &mut state, &ports, now, new_threshold);
+        })?;
+
+        // Handle input with a short poll
+        if event::poll(poll_timeout)? {
+            if let Event::Key(key) = event::read()? {
+                if state.confirm_kill {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            if let Some(port) = ports.get(state.selected) {
+                                let pid = port.pid;
+                                let msg = match kill_process(pid) {
+                                    Ok(()) => format!("Killed PID {}", pid),
+                                    Err(e) => format!("Failed to kill PID {}: {}", pid, e),
+                                };
+                                state.status_msg = Some((msg, Instant::now()));
+                            }
+                            state.confirm_kill = false;
+                        }
+                        _ => {
+                            state.confirm_kill = false;
+                        }
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+
+                        // Toggle mode
+                        KeyCode::Tab => {
+                            state.mode = match state.mode {
+                                ViewMode::Listening => ViewMode::Connections,
+                                ViewMode::Connections => ViewMode::Listening,
+                            };
+                            state.scroll_offset = 0;
+                            state.selected = 0;
+                        }
+
+                        // Sort
+                        KeyCode::Char('p') => state.sort = SortField::Port,
+                        KeyCode::Char('i') => state.sort = SortField::Pid,
+                        KeyCode::Char('n') => state.sort = SortField::Name,
+
+                        // Kill
+                        KeyCode::Char('k') => {
+                            if !ports.is_empty() {
+                                state.confirm_kill = true;
+                            }
+                        }
+
+                        // Navigation
+                        KeyCode::Up | KeyCode::Char('j') if key.code == KeyCode::Up => {
+                            if state.selected > 0 {
+                                state.selected -= 1;
+                            }
+                        }
+                        KeyCode::Up => {
+                            if state.selected > 0 {
+                                state.selected -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if state.selected < ports.len().saturating_sub(1) {
+                                state.selected += 1;
+                            }
+                        }
+                        KeyCode::Char('K') => {
+                            // uppercase K = navigate up (avoid conflict with kill 'k')
+                            if state.selected > 0 {
+                                state.selected -= 1;
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            let (_, height) = terminal::size()?;
+                            let visible = (height as usize).saturating_sub(6);
+                            state.selected = state.selected.saturating_sub(visible);
+                        }
+                        KeyCode::PageDown => {
+                            let (_, height) = terminal::size()?;
+                            let visible = (height as usize).saturating_sub(6);
+                            state.selected =
+                                (state.selected + visible).min(ports.len().saturating_sub(1));
+                        }
+                        KeyCode::Home => state.selected = 0,
+                        KeyCode::End => state.selected = ports.len().saturating_sub(1),
+
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -148,231 +215,219 @@ fn fetch_ports(state: &TopState) -> Result<Vec<PortInfo>> {
         ViewMode::Listening => platform::get_listening_ports()?,
         ViewMode::Connections => platform::get_connections()?,
     };
-
-    // Enrich with Docker info
     ports = PortInfo::enrich_with_docker(ports);
-
-    // Sort
     PortInfo::sort_vec(&mut ports, Some(state.sort));
-
     Ok(ports)
 }
 
-fn render(
-    stdout: &mut io::Stdout,
-    state: &TopState,
+fn draw(
+    frame: &mut ratatui::Frame,
+    state: &mut TopState,
     ports: &[PortInfo],
     now: Instant,
     new_threshold: Duration,
-) -> Result<()> {
-    let (width, height) = terminal::size()?;
-    let width = width as usize;
-    let height = height as usize;
+) {
+    let area = frame.area();
 
-    execute!(stdout, MoveTo(0, 0), Clear(ClearType::All))?;
+    // Layout: header (1), stats (1), table (fill), footer (1)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
 
-    // Header
-    render_header(stdout, state, ports, width)?;
-
-    // Summary stats
-    render_stats(stdout, ports)?;
-
-    // Column headers
-    render_column_headers(stdout, state, width)?;
-
-    // Calculate visible rows (leave room for header, stats, column headers, and footer)
-    let header_lines = 4;
-    let footer_lines = 2;
-    let visible_rows = height.saturating_sub(header_lines + footer_lines);
-
-    // Adjust scroll to keep selection visible
-    let scroll_offset = if state.selected < state.scroll_offset {
-        state.selected
-    } else if state.selected >= state.scroll_offset + visible_rows {
-        state.selected - visible_rows + 1
-    } else {
-        state.scroll_offset
-    };
-
-    // Render ports
-    for (i, port) in ports.iter().skip(scroll_offset).take(visible_rows).enumerate() {
-        let row = header_lines + i;
-        let is_selected = scroll_offset + i == state.selected;
-        let key = (port.port, port.protocol, port.pid);
-        let is_new = state
-            .seen_ports
-            .get(&key)
-            .map(|t| now.duration_since(*t) < new_threshold)
-            .unwrap_or(true);
-
-        render_port_row(stdout, port, row, width, is_selected, is_new, state.mode)?;
-    }
-
-    // Footer
-    render_footer(stdout, height)?;
-
-    stdout.flush()?;
-    Ok(())
-}
-
-fn render_header(
-    stdout: &mut io::Stdout,
-    state: &TopState,
-    ports: &[PortInfo],
-    _width: usize,
-) -> Result<()> {
+    // ── Header ────────────────────────────────────────────────────────────
     let mode_str = match state.mode {
         ViewMode::Listening => "LISTENING",
         ViewMode::Connections => "CONNECTIONS",
     };
-
     let sort_str = match state.sort {
         SortField::Port => "port",
         SortField::Pid => "pid",
         SortField::Name => "name",
     };
 
-    execute!(
-        stdout,
-        MoveTo(0, 0),
-        SetForegroundColor(Color::Cyan),
-        Print(format!("ports top - {} ({} entries, sorted by {})", mode_str, ports.len(), sort_str)),
-        ResetColor,
-    )?;
+    let header_text = if let Some((ref msg, _)) = state.status_msg {
+        Line::from(vec![
+            Span::styled(msg.clone(), Style::default().fg(Color::Yellow)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                format!(
+                    "ports top - {} ({} entries, sorted by {})",
+                    mode_str,
+                    ports.len(),
+                    sort_str
+                ),
+                Style::default().fg(Color::Cyan),
+            ),
+        ])
+    };
+    frame.render_widget(Paragraph::new(header_text), chunks[0]);
 
-    Ok(())
-}
-
-fn render_stats(stdout: &mut io::Stdout, ports: &[PortInfo]) -> Result<()> {
+    // ── Stats ─────────────────────────────────────────────────────────────
     let tcp_count = ports.iter().filter(|p| p.protocol == Protocol::Tcp).count();
     let udp_count = ports.iter().filter(|p| p.protocol == Protocol::Udp).count();
+    let process_count = ports
+        .iter()
+        .map(|p| p.pid)
+        .collect::<std::collections::HashSet<_>>()
+        .len();
 
-    // Count unique processes
-    let mut processes: HashMap<u32, &str> = HashMap::new();
-    for p in ports {
-        processes.entry(p.pid).or_insert(&p.process_name);
+    let stats_text = Line::from(vec![Span::styled(
+        format!("TCP: {}  UDP: {}  Processes: {}", tcp_count, udp_count, process_count),
+        Style::default().fg(Color::DarkGray),
+    )]);
+    frame.render_widget(Paragraph::new(stats_text), chunks[1]);
+
+    // ── Port table ────────────────────────────────────────────────────────
+    let visible_rows = chunks[2].height as usize;
+
+    // Adjust scroll to keep selection visible
+    if state.selected < state.scroll_offset {
+        state.scroll_offset = state.selected;
+    } else if state.selected >= state.scroll_offset + visible_rows {
+        state.scroll_offset = state.selected.saturating_sub(visible_rows) + 1;
     }
 
-    execute!(
-        stdout,
-        MoveTo(0, 1),
-        SetForegroundColor(Color::DarkGrey),
-        Print(format!(
-            "TCP: {}  UDP: {}  Processes: {}",
-            tcp_count, udp_count, processes.len()
-        )),
-        ResetColor,
-    )?;
-
-    Ok(())
-}
-
-fn render_column_headers(stdout: &mut io::Stdout, state: &TopState, width: usize) -> Result<()> {
-    execute!(stdout, MoveTo(0, 3))?;
-
-    let headers = if state.mode == ViewMode::Connections {
-        format!(
-            "{:<7} {:<6} {:<7} {:<22} {:<22} {}",
-            "PROTO", "PORT", "PID", "LOCAL", "REMOTE", "PROCESS"
-        )
+    let is_connections = state.mode == ViewMode::Connections;
+    let header_cells = if is_connections {
+        vec!["PROTO", "PORT", "PID", "LOCAL", "REMOTE", "PROCESS"]
     } else {
-        format!(
-            "{:<7} {:<6} {:<7} {:<22} {}",
-            "PROTO", "PORT", "PID", "ADDRESS", "PROCESS"
-        )
+        vec!["PROTO", "PORT", "PID", "ADDRESS", "PROCESS"]
     };
 
-    execute!(
-        stdout,
-        SetForegroundColor(Color::Yellow),
-        Print(format!("{:width$}", headers, width = width)),
-        ResetColor,
-    )?;
+    let header = Row::new(header_cells.iter().map(|h| {
+        Cell::from(*h).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    }));
 
-    Ok(())
-}
+    let rows: Vec<Row> = ports
+        .iter()
+        .enumerate()
+        .skip(state.scroll_offset)
+        .take(visible_rows)
+        .map(|(i, port)| {
+            let is_selected = i == state.selected;
+            let key = (port.port, port.protocol, port.pid);
+            let is_new = state
+                .seen_ports
+                .get(&key)
+                .map(|t| now.duration_since(*t) < new_threshold)
+                .unwrap_or(true);
 
-fn render_port_row(
-    stdout: &mut io::Stdout,
-    port: &PortInfo,
-    row: usize,
-    width: usize,
-    is_selected: bool,
-    is_new: bool,
-    mode: ViewMode,
-) -> Result<()> {
-    execute!(stdout, MoveTo(0, row as u16))?;
+            let process_display = if let Some(ref container) = port.container {
+                format!("{} ({})", port.process_name, container)
+            } else {
+                port.process_name.clone()
+            };
 
-    // Build the line
-    let process_display = if let Some(ref container) = port.container {
-        format!("{} ({})", port.process_name, container)
+            let cells: Vec<Cell> = if is_connections {
+                let remote = port.remote_address.as_deref().unwrap_or("-");
+                vec![
+                    Cell::from(port.protocol.to_string()),
+                    Cell::from(port.port.to_string()),
+                    Cell::from(port.pid.to_string()),
+                    Cell::from(port.address.clone()),
+                    Cell::from(remote.to_string()),
+                    Cell::from(process_display),
+                ]
+            } else {
+                vec![
+                    Cell::from(port.protocol.to_string()),
+                    Cell::from(port.port.to_string()),
+                    Cell::from(port.pid.to_string()),
+                    Cell::from(port.address.clone()),
+                    Cell::from(process_display),
+                ]
+            };
+
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_new {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default()
+            };
+
+            Row::new(cells).style(style)
+        })
+        .collect();
+
+    let widths = if is_connections {
+        vec![
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(7),
+            Constraint::Length(22),
+            Constraint::Length(22),
+            Constraint::Fill(1),
+        ]
     } else {
-        port.process_name.clone()
+        vec![
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(7),
+            Constraint::Length(22),
+            Constraint::Fill(1),
+        ]
     };
 
-    let line = if mode == ViewMode::Connections {
-        let remote = port.remote_address.as_deref().unwrap_or("-");
-        format!(
-            "{:<7} {:<6} {:<7} {:<22} {:<22} {}",
-            port.protocol.to_string(),
-            port.port,
-            port.pid,
-            truncate(&port.address, 22),
-            truncate(remote, 22),
-            process_display
-        )
+    let mut table_state = TableState::default();
+    // TableState doesn't control our custom scroll, but we still pass it for API compat.
+    let table = Table::new(rows, widths).header(header);
+    frame.render_stateful_widget(table, chunks[2], &mut table_state);
+
+    // ── Footer ────────────────────────────────────────────────────────────
+    let footer_text = if state.confirm_kill {
+        Line::from(vec![Span::styled(
+            "Kill selected process? [y]es / any key to cancel",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )])
     } else {
-        format!(
-            "{:<7} {:<6} {:<7} {:<22} {}",
-            port.protocol.to_string(),
-            port.port,
-            port.pid,
-            truncate(&port.address, 22),
-            process_display
-        )
+        Line::from(vec![Span::styled(
+            "q:Quit  Tab:Toggle  p/i/n:Sort  ↑↓/j/K:Navigate  PgUp/PgDn:Page  k:Kill",
+            Style::default().fg(Color::DarkGray),
+        )])
     };
+    frame.render_widget(Paragraph::new(footer_text), chunks[3]);
 
-    let line = format!("{:width$}", line, width = width);
-
-    // Color based on state
-    if is_selected {
-        execute!(
-            stdout,
-            SetForegroundColor(Color::Black),
-            crossterm::style::SetBackgroundColor(Color::White),
-            Print(&line),
-            ResetColor,
-        )?;
-    } else if is_new {
-        execute!(
-            stdout,
-            SetForegroundColor(Color::Green),
-            Print(&line),
-            ResetColor,
-        )?;
-    } else {
-        execute!(stdout, Print(&line))?;
+    // ── Kill confirmation popup ────────────────────────────────────────────
+    if state.confirm_kill {
+        if let Some(port) = ports.get(state.selected) {
+            let popup_text = format!(
+                "Kill PID {} ({}) on port {}?  [y]es / any key to cancel",
+                port.pid, port.process_name, port.port
+            );
+            let popup_area = centered_rect(60, 3, area);
+            frame.render_widget(Clear, popup_area);
+            frame.render_widget(
+                Paragraph::new(popup_text)
+                    .block(Block::default().borders(Borders::ALL).title("Confirm Kill"))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Red)),
+                popup_area,
+            );
+        }
     }
-
-    Ok(())
 }
 
-fn render_footer(stdout: &mut io::Stdout, height: usize) -> Result<()> {
-    execute!(
-        stdout,
-        MoveTo(0, (height - 1) as u16),
-        SetForegroundColor(Color::DarkGrey),
-        Print("q:Quit  Tab:Toggle mode  p/i/n:Sort by port/pid/name  ↑↓/jk:Navigate  PgUp/PgDn:Page"),
-        ResetColor,
-    )?;
-
-    Ok(())
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max_len - 1])
+/// Returns a centered `Rect` with the given percentage width and fixed height.
+fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
+    let popup_width = r.width * percent_x / 100;
+    let x = r.x + (r.width.saturating_sub(popup_width)) / 2;
+    let y = r.y + r.height / 2;
+    Rect {
+        x,
+        y,
+        width: popup_width,
+        height: height.min(r.height),
     }
 }

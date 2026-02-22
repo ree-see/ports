@@ -71,6 +71,7 @@ pub fn run(cli: Cli) -> Result<()> {
             connections: cli.connections,
             sort: cli.sort,
             protocol: cli.protocol,
+            use_regex: cli.regex,
         });
     }
 
@@ -78,8 +79,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(cli::Commands::List) => {
             commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol)
         }
-        Some(cli::Commands::Kill { target, force, all }) => {
-            commands::kill::execute(target, *force, *all)
+        Some(cli::Commands::Kill { target, force, all, connections }) => {
+            commands::kill::execute(target, *force, *all, *connections)
         }
         Some(cli::Commands::Top { connections }) => {
             top::run(*connections)
@@ -105,11 +106,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 cli::HistoryAction::Clean { keep } => {
                     commands::history::cleanup(*keep, cli.json)
                 }
+                cli::HistoryAction::Diff { ago } => {
+                    commands::history::diff(*ago, cli.json)
+                }
             }
         }
         None => match &cli.query {
             Some(query) => {
-                commands::query::execute(query, cli.json, cli.connections, cli.sort, cli.protocol)
+                commands::query::execute(query, cli.json, cli.connections, cli.sort, cli.protocol, cli.regex)
             }
             None => commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol),
         },
@@ -128,22 +132,7 @@ fn run_interactive(cli: &Cli) -> Result<()> {
     let mut ports = PortInfo::enrich_with_docker(ports);
 
     if let Some(query) = &cli.query {
-        let query_lower = query.to_lowercase();
-        ports = if let Ok(port_num) = query.parse::<u16>() {
-            ports.into_iter().filter(|p| p.port == port_num).collect()
-        } else {
-            ports
-                .into_iter()
-                .filter(|p| {
-                    // Match process name or container name
-                    p.process_name.to_lowercase().contains(&query_lower)
-                        || p.container
-                            .as_ref()
-                            .map(|c| c.to_lowercase().contains(&query_lower))
-                            .unwrap_or(false)
-                })
-                .collect()
-        };
+        ports = PortInfo::filter_by_query(ports, query, cli.regex)?;
     }
 
     PortInfo::sort_vec(&mut ports, cli.sort);

@@ -5,7 +5,7 @@ use chrono::Local;
 use colored::Colorize;
 use comfy_table::{presets::UTF8_FULL_CONDENSED, Attribute, Cell, Color, ContentArrangement, Table};
 
-use crate::history::{self, HistoryQuery};
+use crate::history::{self, DiffAction, HistoryQuery};
 
 /// Record a snapshot of current port state
 pub fn record(include_connections: bool, json: bool) -> Result<()> {
@@ -221,6 +221,69 @@ pub fn timeline(port: u16, hours: i64, json: bool) -> Result<()> {
         );
     }
     
+    Ok(())
+}
+
+/// Show diff between two snapshots
+pub fn diff(ago: usize, json: bool) -> Result<()> {
+    let entries = history::get_diff(ago)?;
+
+    if json {
+        let output: Vec<_> = entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "port": e.port,
+                    "protocol": e.protocol,
+                    "process_name": e.process_name,
+                    "action": match e.action {
+                        DiffAction::Appeared => "appeared",
+                        DiffAction::Disappeared => "disappeared",
+                    },
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!("{}", "No changes detected between snapshots.".yellow());
+        return Ok(());
+    }
+
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("PORT").add_attribute(Attribute::Bold),
+            Cell::new("PROTO").add_attribute(Attribute::Bold),
+            Cell::new("PROCESS").add_attribute(Attribute::Bold),
+            Cell::new("ACTION").add_attribute(Attribute::Bold),
+        ]);
+
+    for entry in &entries {
+        let (action_cell, port_color) = match entry.action {
+            DiffAction::Appeared => (
+                Cell::new("appeared").fg(Color::Green),
+                Color::Green,
+            ),
+            DiffAction::Disappeared => (
+                Cell::new("disappeared").fg(Color::Red),
+                Color::Red,
+            ),
+        };
+
+        table.add_row(vec![
+            Cell::new(entry.port).fg(port_color),
+            Cell::new(&entry.protocol),
+            Cell::new(&entry.process_name),
+            action_cell,
+        ]);
+    }
+
+    println!("{table}");
     Ok(())
 }
 

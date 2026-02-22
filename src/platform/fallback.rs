@@ -19,6 +19,7 @@ pub fn get_listening_ports() -> anyhow::Result<Vec<crate::types::PortInfo>> {
             address: l.socket.to_string(),
             remote_address: None,
             container: None,
+            service_name: None,
         })
         .collect();
 
