@@ -27,33 +27,39 @@ fn db_path() -> Result<PathBuf> {
 
 /// Initialize the database schema
 fn init_db(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            unix_ts INTEGER NOT NULL
-        );
-        
-        CREATE TABLE IF NOT EXISTS ports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            snapshot_id INTEGER NOT NULL,
-            port INTEGER NOT NULL,
-            protocol TEXT NOT NULL,
-            address TEXT NOT NULL,
-            pid INTEGER,
-            process_name TEXT,
-            container TEXT,
-            state TEXT,
-            remote_addr TEXT,
-            FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_ports_snapshot ON ports(snapshot_id);
-        CREATE INDEX IF NOT EXISTS idx_ports_port ON ports(port);
-        CREATE INDEX IF NOT EXISTS idx_snapshots_unix_ts ON snapshots(unix_ts);
-        "
-    )?;
+    let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+
+    if version < 1 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                unix_ts INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                port INTEGER NOT NULL,
+                protocol TEXT NOT NULL,
+                address TEXT NOT NULL,
+                pid INTEGER,
+                process_name TEXT,
+                container TEXT,
+                state TEXT,
+                remote_addr TEXT,
+                FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ports_snapshot ON ports(snapshot_id);
+            CREATE INDEX IF NOT EXISTS idx_ports_port ON ports(port);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_unix_ts ON snapshots(unix_ts);
+            "
+        )?;
+        conn.execute_batch("PRAGMA user_version = 1;")?;
+    }
+    // Future: if version < 2 { ALTER TABLE ... }
     Ok(())
 }
 
@@ -367,6 +373,97 @@ pub struct PortTimelineEntry {
     pub process_name: String,
     pub container: Option<String>,
     pub state: Option<String>,
+}
+
+/// Action for a diff entry: port appeared or disappeared.
+#[derive(Debug)]
+pub enum DiffAction {
+    Appeared,
+    Disappeared,
+}
+
+/// A port that changed between two snapshots.
+#[derive(Debug)]
+pub struct DiffEntry {
+    pub port: u16,
+    pub protocol: String,
+    pub process_name: String,
+    pub action: DiffAction,
+}
+
+/// Compare the latest snapshot against one `snapshots_ago` snapshots earlier.
+///
+/// Returns ports that appeared (present in latest but not older) and disappeared
+/// (present in older but not latest), ordered by action then port.
+pub fn get_diff(snapshots_ago: usize) -> Result<Vec<DiffEntry>> {
+    let conn = open_db()?;
+
+    // Get the (snapshots_ago + 1) most recent snapshot IDs, ordered desc
+    let mut stmt = conn.prepare(
+        "SELECT id FROM snapshots ORDER BY unix_ts DESC LIMIT ?"
+    )?;
+    let ids: Vec<i64> = stmt
+        .query_map(params![(snapshots_ago + 1) as i64], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+
+    if ids.len() < 2 {
+        return Ok(Vec::new()); // not enough history to diff
+    }
+
+    let latest_id = ids[0];
+    let older_id = ids[snapshots_ago.min(ids.len() - 1)];
+
+    // Ports in latest but not in older → Appeared
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT p.port, p.protocol, COALESCE(p.process_name, '') as process_name
+         FROM ports p
+         WHERE p.snapshot_id = ?1
+           AND NOT EXISTS (
+               SELECT 1 FROM ports o
+               WHERE o.snapshot_id = ?2
+                 AND o.port = p.port
+                 AND o.protocol = p.protocol
+           )
+         ORDER BY p.port ASC"
+    )?;
+    let appeared: Vec<DiffEntry> = stmt
+        .query_map(params![latest_id, older_id], |r| {
+            Ok(DiffEntry {
+                port: r.get::<_, i32>(0)? as u16,
+                protocol: r.get(1)?,
+                process_name: r.get(2)?,
+                action: DiffAction::Appeared,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+
+    // Ports in older but not in latest → Disappeared
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT p.port, p.protocol, COALESCE(p.process_name, '') as process_name
+         FROM ports p
+         WHERE p.snapshot_id = ?1
+           AND NOT EXISTS (
+               SELECT 1 FROM ports n
+               WHERE n.snapshot_id = ?2
+                 AND n.port = p.port
+                 AND n.protocol = p.protocol
+           )
+         ORDER BY p.port ASC"
+    )?;
+    let disappeared: Vec<DiffEntry> = stmt
+        .query_map(params![older_id, latest_id], |r| {
+            Ok(DiffEntry {
+                port: r.get::<_, i32>(0)? as u16,
+                protocol: r.get(1)?,
+                process_name: r.get(2)?,
+                action: DiffAction::Disappeared,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+
+    let mut entries = appeared;
+    entries.extend(disappeared);
+    Ok(entries)
 }
 
 /// Format bytes for display

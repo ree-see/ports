@@ -17,6 +17,7 @@ pub struct WatchOptions {
     pub connections: bool,
     pub sort: Option<SortField>,
     pub protocol: Option<ProtocolFilter>,
+    pub use_regex: bool,
 }
 
 pub fn run(options: WatchOptions) -> Result<()> {
@@ -33,7 +34,7 @@ pub fn run(options: WatchOptions) -> Result<()> {
         let ports = PortInfo::filter_protocol(ports, options.protocol);
         // Enrich docker-proxy entries with container names
         let ports = PortInfo::enrich_with_docker(ports);
-        let mut filtered = filter_ports(ports, &options.filter);
+        let mut filtered = filter_ports(ports, &options.filter, options.use_regex)?;
         PortInfo::sort_vec(&mut filtered, options.sort);
 
         if options.json {
@@ -55,27 +56,10 @@ pub fn run(options: WatchOptions) -> Result<()> {
     }
 }
 
-fn filter_ports(ports: Vec<PortInfo>, filter: &Option<String>) -> Vec<PortInfo> {
+fn filter_ports(ports: Vec<PortInfo>, filter: &Option<String>, use_regex: bool) -> anyhow::Result<Vec<PortInfo>> {
     match filter {
-        None => ports,
-        Some(query) => {
-            let query_lower = query.to_lowercase();
-            if let Ok(port_num) = query.parse::<u16>() {
-                ports.into_iter().filter(|p| p.port == port_num).collect()
-            } else {
-                ports
-                    .into_iter()
-                    .filter(|p| {
-                        // Match process name or container name
-                        p.process_name.to_lowercase().contains(&query_lower)
-                            || p.container
-                                .as_ref()
-                                .map(|c| c.to_lowercase().contains(&query_lower))
-                                .unwrap_or(false)
-                    })
-                    .collect()
-            }
-        }
+        None => Ok(ports),
+        Some(query) => PortInfo::filter_by_query(ports, query, use_regex),
     }
 }
 

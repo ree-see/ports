@@ -1,32 +1,15 @@
 //! Docker container integration for mapping ports to containers.
 //!
-//! When a port is being forwarded by `docker-proxy`, this module can
-//! determine which container the port is mapped to.
+//! Uses the bollard API instead of spawning `docker ps`, with a 3-second TTL
+//! cache to avoid repeated subprocess overhead in watch/top mode.
 
 use std::collections::HashMap;
-use std::process::Command;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use anyhow::Result;
 
-/// Container port mapping information.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PortMapping {
-    #[serde(rename = "HostPort")]
-    pub host_port: String,
-}
-
-/// Container information from `docker ps`.
-#[derive(Debug, Clone, Deserialize)]
-struct ContainerJson {
-    #[serde(rename = "ID")]
-    id: String,
-    #[serde(rename = "Names")]
-    names: String,
-    #[serde(rename = "Ports")]
-    ports: String,
-}
-
-/// Parsed container info with extracted port mappings.
+/// Container information from the Docker daemon.
 #[derive(Debug, Clone)]
 pub struct ContainerInfo {
     pub id: String,
@@ -41,50 +24,78 @@ impl ContainerInfo {
     }
 }
 
-/// Check if Docker is available on this system.
-pub fn is_docker_available() -> bool {
-    Command::new("docker")
-        .args(["version", "--format", "{{.Server.Version}}"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+type PortCache = Option<(Instant, HashMap<u16, ContainerInfo>)>;
+
+// Global cache: (last_refresh, port_mappings)
+static DOCKER_CACHE: LazyLock<Mutex<PortCache>> = LazyLock::new(|| Mutex::new(None));
+
+const CACHE_TTL: Duration = Duration::from_secs(3);
 
 /// Get a mapping of host ports to container information.
-/// 
-/// Returns a HashMap where keys are host ports and values are container info.
+///
+/// Results are cached for up to 3 seconds to avoid overhead in hot loops.
 pub fn get_port_mappings() -> HashMap<u16, ContainerInfo> {
-    let mut mappings = HashMap::new();
+    let mut cache = DOCKER_CACHE.lock().unwrap();
 
-    // Try to get container info using docker ps with JSON format
-    let output = match Command::new("docker")
-        .args(["ps", "--format", "{{json .}}"])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return mappings,
+    if let Some((last, ref data)) = *cache {
+        if last.elapsed() < CACHE_TTL {
+            return data.clone();
+        }
+    }
+
+    let fresh = tokio::runtime::Runtime::new()
+        .ok()
+        .and_then(|rt| rt.block_on(fetch_from_bollard()).ok())
+        .unwrap_or_default();
+
+    *cache = Some((Instant::now(), fresh.clone()));
+    fresh
+}
+
+async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
+    use bollard::container::ListContainersOptions;
+    use bollard::models::PortTypeEnum;
+
+    let docker = bollard::Docker::connect_with_local_defaults()?;
+    let options = ListContainersOptions::<String> {
+        all: false,
+        ..Default::default()
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let containers = docker.list_containers(Some(options)).await?;
+    let mut mappings: HashMap<u16, ContainerInfo> = HashMap::new();
 
-    for line in stdout.lines() {
-        if line.trim().is_empty() {
-            continue;
+    for container in containers {
+        let id = container
+            .id
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .take(12)
+            .collect::<String>();
+
+        let name = container
+            .names
+            .as_ref()
+            .and_then(|n| n.first())
+            .map(|n| n.trim_start_matches('/').to_string())
+            .unwrap_or_default();
+
+        let mut port_pairs: Vec<(u16, u16)> = Vec::new();
+
+        if let Some(ports) = container.ports {
+            for p in &ports {
+                if p.typ != Some(PortTypeEnum::TCP) && p.typ != Some(PortTypeEnum::UDP) {
+                    continue;
+                }
+                if let (Some(host_port), Some(private_port)) = (p.public_port, Some(p.private_port)) {
+                    port_pairs.push((host_port, private_port));
+                }
+            }
         }
 
-        let container: ContainerJson = match serde_json::from_str(line) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        // Parse ports like "0.0.0.0:3000->80/tcp, :::3000->80/tcp"
-        let port_pairs = parse_port_string(&container.ports);
-
-        // Clean up container name (remove leading /)
-        let name = container.names.trim_start_matches('/').to_string();
-
         let info = ContainerInfo {
-            id: container.id.chars().take(12).collect(),
+            id,
             name,
             ports: port_pairs.clone(),
         };
@@ -94,46 +105,7 @@ pub fn get_port_mappings() -> HashMap<u16, ContainerInfo> {
         }
     }
 
-    mappings
-}
-
-/// Parse Docker port string format: "0.0.0.0:3000->80/tcp, :::3000->80/tcp"
-fn parse_port_string(ports: &str) -> Vec<(u16, u16)> {
-    let mut result = Vec::new();
-
-    for mapping in ports.split(',') {
-        let mapping = mapping.trim();
-        if mapping.is_empty() {
-            continue;
-        }
-
-        // Match pattern: HOST:PORT->CONTAINER/PROTO
-        // Examples: "0.0.0.0:3000->80/tcp", ":::3000->80/tcp"
-        if let Some(arrow_pos) = mapping.find("->") {
-            let host_part = &mapping[..arrow_pos];
-            let container_part = &mapping[arrow_pos + 2..];
-
-            // Extract host port (after last :)
-            let host_port: u16 = host_part
-                .rsplit(':')
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-
-            // Extract container port (before /)
-            let container_port: u16 = container_part
-                .split('/')
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-
-            if host_port > 0 && container_port > 0 {
-                result.push((host_port, container_port));
-            }
-        }
-    }
-
-    result
+    Ok(mappings)
 }
 
 #[cfg(test)]
@@ -141,34 +113,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_port_string_single() {
-        let ports = parse_port_string("0.0.0.0:3000->80/tcp");
-        assert_eq!(ports, vec![(3000, 80)]);
-    }
-
-    #[test]
-    fn test_parse_port_string_multiple() {
-        let ports = parse_port_string("0.0.0.0:3000->80/tcp, :::3000->80/tcp");
-        assert_eq!(ports, vec![(3000, 80), (3000, 80)]);
-    }
-
-    #[test]
-    fn test_parse_port_string_ipv6() {
-        let ports = parse_port_string(":::8080->8080/tcp");
-        assert_eq!(ports, vec![(8080, 8080)]);
-    }
-
-    #[test]
-    fn test_parse_port_string_empty() {
-        let ports = parse_port_string("");
-        assert!(ports.is_empty());
-    }
-
-    #[test]
-    fn test_parse_port_string_complex() {
-        let ports = parse_port_string("0.0.0.0:443->443/tcp, 0.0.0.0:80->80/tcp, :::443->443/tcp");
-        assert_eq!(ports.len(), 3);
-        assert!(ports.contains(&(443, 443)));
-        assert!(ports.contains(&(80, 80)));
+    fn test_container_info_display_name() {
+        let info = ContainerInfo {
+            id: "abc123".to_string(),
+            name: "my-container".to_string(),
+            ports: vec![(3000, 80)],
+        };
+        assert_eq!(info.display_name(), "my-container");
     }
 }

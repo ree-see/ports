@@ -36,6 +36,10 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub interactive: bool,
 
+    /// Treat query as a regular expression
+    #[arg(long, global = true)]
+    pub regex: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -67,6 +71,9 @@ pub enum Commands {
         /// Kill all matching processes (instead of erroring on multiple matches)
         #[arg(short, long)]
         all: bool,
+        /// Search established connections in addition to listening ports
+        #[arg(long)]
+        connections: bool,
     },
     /// Interactive real-time view (like htop for ports)
     Top {
@@ -125,5 +132,11 @@ pub enum HistoryAction {
         /// Hours of history to keep (default: 168 = 1 week)
         #[arg(short, long, default_value = "168")]
         keep: i64,
+    },
+    /// Show ports that appeared or disappeared between two snapshots
+    Diff {
+        /// Compare latest snapshot against this many snapshots ago (default: 1)
+        #[arg(short, long, default_value = "1")]
+        ago: usize,
     },
 }

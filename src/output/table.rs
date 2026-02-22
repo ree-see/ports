@@ -21,11 +21,15 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
 
     let has_remote = ports.iter().any(|p| p.remote_address.is_some());
     let has_container = ports.iter().any(|p| p.container.is_some());
+    let has_service = ports.iter().any(|p| p.service_name.is_some());
 
     let mut table = Table::new();
-    
+
     // Build header based on what columns we need
     let mut headers = vec!["PORT", "PROTO", "PID", "PROCESS"];
+    if has_service {
+        headers.push("SERVICE");
+    }
     if has_container {
         headers.push("CONTAINER");
     }
@@ -55,6 +59,11 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
             Cell::new(port.pid).fg(row_color),
             Cell::new(&port.process_name).fg(row_color),
         ];
+
+        if has_service {
+            let service = port.service_name.as_deref().unwrap_or("-");
+            row.push(Cell::new(service).fg(row_color));
+        }
 
         if has_container {
             let container = port.container.as_deref().unwrap_or("-");

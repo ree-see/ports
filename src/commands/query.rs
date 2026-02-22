@@ -11,6 +11,7 @@ pub fn execute(
     connections: bool,
     sort: Option<SortField>,
     protocol: Option<ProtocolFilter>,
+    use_regex: bool,
 ) -> Result<()> {
     let ports = if connections {
         platform::get_connections()?
@@ -22,22 +23,7 @@ pub fn execute(
     // Enrich docker-proxy entries with container names
     let ports = PortInfo::enrich_with_docker(ports);
 
-    let query_lower = query.to_lowercase();
-    let mut filtered: Vec<_> = if let Ok(port_num) = query.parse::<u16>() {
-        ports.into_iter().filter(|p| p.port == port_num).collect()
-    } else {
-        ports
-            .into_iter()
-            .filter(|p| {
-                // Match process name or container name
-                p.process_name.to_lowercase().contains(&query_lower)
-                    || p.container
-                        .as_ref()
-                        .map(|c| c.to_lowercase().contains(&query_lower))
-                        .unwrap_or(false)
-            })
-            .collect()
-    };
+    let mut filtered = PortInfo::filter_by_query(ports, query, use_regex)?;
 
     PortInfo::sort_vec(&mut filtered, sort);
 

@@ -92,6 +92,7 @@ fn get_ports(mode: FilterMode) -> Result<Vec<PortInfo>> {
                         address: format!("{}:{}", socket.local_addr, socket.local_port),
                         remote_address: remote,
                         container: None,
+                        service_name: None,
                     });
                 }
             }

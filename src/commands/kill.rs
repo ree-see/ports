@@ -2,26 +2,22 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 use anyhow::{bail, Context, Result};
-use sysinfo::{Pid, Signal, System};
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
 
 use crate::platform;
 use crate::types::PortInfo;
 
-pub fn execute(target: &str, force: bool, all: bool) -> Result<()> {
-    let ports = platform::get_listening_ports()?;
+pub fn execute(target: &str, force: bool, all: bool, connections: bool) -> Result<()> {
+    let mut ports = platform::get_listening_ports()?;
+    if connections {
+        ports.extend(platform::get_connections()?);
+        // Deduplicate by PID+port to avoid double-reporting
+        ports.sort_by_key(|p| (p.pid, p.port));
+        ports.dedup_by_key(|p| (p.pid, p.port));
+    }
 
-    let matches: Vec<_> = if let Ok(port_num) = target.parse::<u16>() {
-        ports.into_iter().filter(|p| p.port == port_num).collect()
-    } else {
-        ports
-            .into_iter()
-            .filter(|p| {
-                p.process_name
-                    .to_lowercase()
-                    .contains(&target.to_lowercase())
-            })
-            .collect()
-    };
+    let matches = PortInfo::filter_by_query(ports, target, false)?;
 
     if matches.is_empty() {
         bail!("No process found matching '{}'", target);
@@ -99,17 +95,7 @@ fn confirm_kill() -> Result<bool> {
 }
 
 pub fn kill_process(pid: u32) -> Result<()> {
-    let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-
-    let sysinfo_pid = Pid::from_u32(pid);
-    let process = sys
-        .process(sysinfo_pid)
-        .context(format!("Process {} not found", pid))?;
-
-    if !process.kill_with(Signal::Term).unwrap_or(false) {
-        bail!("Failed to kill process {}", pid);
-    }
-
+    kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
+        .with_context(|| format!("Failed to kill PID {}", pid))?;
     Ok(())
 }
