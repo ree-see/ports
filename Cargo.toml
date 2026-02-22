@@ -1,6 +1,6 @@
 [package]
 name = "portls"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Modern cross-platform port inspector - ls for network ports"
 license = "MIT"
