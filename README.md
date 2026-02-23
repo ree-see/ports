@@ -224,6 +224,12 @@ eval "$(ports completions zsh)"   # ~/.zshrc
 ports completions fish | source   # ~/.config/fish/config.fish
 ```
 
+## Claude Code Integration
+
+This repo ships with a [Claude Code](https://claude.ai/code) skill at `.claude/commands/ports.md`. When you open this project in Claude Code, it automatically knows the full `ports` CLI — every subcommand, flag, and common recipe. No MCP server to install, no config to set up.
+
+Ask it to kill a port, monitor connections, check history diffs, or anything else `ports` can do and it'll use the CLI directly through bash.
+
 ## Platform Support
 
 | Platform | Listening ports | Connections |
