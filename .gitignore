@@ -15,3 +15,6 @@ Thumbs.db
 # Debug
 *.log
 AGENTS.md
+
+# Claude Code local settings (keep .claude/commands/ tracked)
+.claude/settings.local.json
