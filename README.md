@@ -84,6 +84,34 @@ ports -w --regex "node|go"  # Watch with regex filter
 
 New entries are highlighted in green.
 
+### Explain why a port is open
+
+```bash
+ports why 3000              # Trace ancestry by port number
+ports why node              # Trace ancestry by process name
+ports why 54321             # Trace ancestry by PID
+ports why node --json       # JSON output
+```
+
+```
+Process: node (PID 12345)
+  Ports:     3000/tcp
+  Source:    shell
+  Chain:     launchd(1) → Terminal(500) → zsh(12300) → npm(12340) → node(12345)
+  Git:       my-app (main)
+```
+
+Traces the full process ancestry chain and identifies the source — who started it and why. Auto-detects the target as a port number, PID, or process name.
+
+Source detection covers: systemd, launchd, Docker, cron, pm2, supervisord, gunicorn, runit, s6, tmux, screen, nohup, and direct shell invocations. Also detects git repo context and health warnings (deleted binaries, zombie processes).
+
+The `--why` flag also works inline with regular queries:
+
+```bash
+ports 3000 --why            # Standard port query + ancestry info
+ports node --why            # Process query + ancestry info
+```
+
 ### Kill processes
 
 ```bash
@@ -243,6 +271,12 @@ Ask it to kill a port, monitor connections, check history diffs, or anything els
 ```bash
 # Find what's blocking port 8080
 ports 8080
+
+# Find out why a port is open (trace process ancestry)
+ports why 3000
+
+# Quick ancestry info inline with a query
+ports 8080 --why
 
 # Monitor all network activity in real-time
 ports -c -w
