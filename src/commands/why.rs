@@ -17,7 +17,7 @@ pub fn execute(target: &str, output_json: bool) -> Result<()> {
     }
     let ports = PortInfo::enrich_with_docker(ports);
 
-    // Auto-detect target type: try port number first, then name/PID.
+    // Auto-detect target type: try port number first, then PID, then name.
     let matches = if let Ok(port_num) = target.parse::<u16>() {
         let by_port: Vec<_> = ports
             .iter()
@@ -25,7 +25,7 @@ pub fn execute(target: &str, output_json: bool) -> Result<()> {
             .cloned()
             .collect();
         if by_port.is_empty() {
-            // Maybe it's a PID, not a port number.
+            // u16 fits in u32 — try as PID.
             ports
                 .iter()
                 .filter(|p| p.pid == port_num as u32)
@@ -34,6 +34,9 @@ pub fn execute(target: &str, output_json: bool) -> Result<()> {
         } else {
             by_port
         }
+    } else if let Ok(pid) = target.parse::<u32>() {
+        // Doesn't fit in u16, so it can only be a PID.
+        ports.iter().filter(|p| p.pid == pid).cloned().collect()
     } else {
         let target_lower = target.to_lowercase();
         ports

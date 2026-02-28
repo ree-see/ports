@@ -155,16 +155,8 @@ fn run_loop(
                     }
                 } else if state.detail_pid.is_some() {
                     // Dismiss detail popup on any key.
-                    match key.code {
-                        KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                            state.detail_pid = None;
-                            state.detail_ancestry = None;
-                        }
-                        _ => {
-                            state.detail_pid = None;
-                            state.detail_ancestry = None;
-                        }
-                    }
+                    state.detail_pid = None;
+                    state.detail_ancestry = None;
                 } else {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
@@ -205,12 +197,7 @@ fn run_loop(
                         }
 
                         // Navigation
-                        KeyCode::Up | KeyCode::Char('j') if key.code == KeyCode::Up => {
-                            if state.selected > 0 {
-                                state.selected -= 1;
-                            }
-                        }
-                        KeyCode::Up => {
+                        KeyCode::Up | KeyCode::Char('K') => {
                             if state.selected > 0 {
                                 state.selected -= 1;
                             }
@@ -218,12 +205,6 @@ fn run_loop(
                         KeyCode::Down | KeyCode::Char('j') => {
                             if state.selected < ports.len().saturating_sub(1) {
                                 state.selected += 1;
-                            }
-                        }
-                        KeyCode::Char('K') => {
-                            // uppercase K = navigate up (avoid conflict with kill 'k')
-                            if state.selected > 0 {
-                                state.selected -= 1;
                             }
                         }
                         KeyCode::PageUp => {

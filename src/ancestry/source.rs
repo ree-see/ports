@@ -64,10 +64,9 @@ pub fn detect_source(chain: &[Ancestor], cgroup: Option<&str>) -> SourceType {
 
     // For tiers 3-6, walk the chain from TOP (nearest PID 1) to BOTTOM (target)
     // so the highest-level supervisor wins.
-    let chain_top_down: Vec<&Ancestor> = chain.iter().rev().collect();
 
     // Tier 3: Known supervisors.
-    for ancestor in &chain_top_down {
+    for ancestor in chain.iter().rev() {
         let name_lower = ancestor.name.to_lowercase();
         for (supervisor_name, source_type) in SUPERVISORS {
             if name_lower == *supervisor_name {
@@ -77,7 +76,7 @@ pub fn detect_source(chain: &[Ancestor], cgroup: Option<&str>) -> SourceType {
     }
 
     // Tier 4: Multiplexers.
-    for ancestor in &chain_top_down {
+    for ancestor in chain.iter().rev() {
         let name_lower = ancestor.name.to_lowercase();
         for (mux_name, source_type) in MULTIPLEXERS {
             if name_lower == *mux_name || name_lower.starts_with(mux_name) {
@@ -87,7 +86,7 @@ pub fn detect_source(chain: &[Ancestor], cgroup: Option<&str>) -> SourceType {
     }
 
     // Tier 5: Cron.
-    for ancestor in &chain_top_down {
+    for ancestor in chain.iter().rev() {
         let name_lower = ancestor.name.to_lowercase();
         if CRON_NAMES.contains(&name_lower.as_str()) {
             return SourceType::Cron;

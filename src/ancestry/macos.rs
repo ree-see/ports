@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use super::git;
@@ -11,7 +11,7 @@ use super::{Ancestor, ProcessAncestry};
 /// A cached snapshot of the full macOS process table.
 struct ProcessTable {
     /// Map from PID to (name, ppid).
-    entries: HashMap<u32, (String, u32)>,
+    entries: Arc<HashMap<u32, (String, u32)>>,
     fetched_at: Instant,
 }
 
@@ -88,18 +88,18 @@ fn walk_ppid_chain(pid: u32) -> Vec<Ancestor> {
 }
 
 /// Build or return a cached process table from `ps -A -o pid=,ppid=,comm=`.
-fn get_or_refresh_table() -> HashMap<u32, (String, u32)> {
+fn get_or_refresh_table() -> Arc<HashMap<u32, (String, u32)>> {
     let mut guard = PROCESS_TABLE.lock().unwrap();
 
     if let Some(ref table) = *guard {
         if table.fetched_at.elapsed() < TABLE_TTL {
-            return table.entries.clone();
+            return Arc::clone(&table.entries);
         }
     }
 
-    let entries = build_process_table();
+    let entries = Arc::new(build_process_table());
     *guard = Some(ProcessTable {
-        entries: entries.clone(),
+        entries: Arc::clone(&entries),
         fetched_at: Instant::now(),
     });
 
