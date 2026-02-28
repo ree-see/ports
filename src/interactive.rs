@@ -1,10 +1,16 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use dialoguer::{theme::ColorfulTheme, Select};
 
+use crate::ancestry::ProcessAncestry;
 use crate::commands::kill::kill_process;
 use crate::types::PortInfo;
 
-pub fn select_and_kill(ports: &[PortInfo]) -> Result<()> {
+pub fn select_and_kill(
+    ports: &[PortInfo],
+    ancestry_map: Option<&HashMap<u32, ProcessAncestry>>,
+) -> Result<()> {
     if ports.is_empty() {
         bail!("No ports to select from");
     }
@@ -12,10 +18,16 @@ pub fn select_and_kill(ports: &[PortInfo]) -> Result<()> {
     let items: Vec<String> = ports
         .iter()
         .map(|p| {
-            format!(
+            let base = format!(
                 "{:>5} {:4} {:>6} {}",
                 p.port, p.protocol, p.pid, p.process_name
-            )
+            );
+            if let Some(map) = ancestry_map {
+                if let Some(a) = map.get(&p.pid) {
+                    return format!("{} [{}]", base, a.source);
+                }
+            }
+            base
         })
         .collect();
 

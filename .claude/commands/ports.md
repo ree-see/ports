@@ -1,6 +1,6 @@
 ---
 name: ports
-description: "Use when killing processes on a port, inspecting port usage, monitoring network activity, or managing port history on this machine"
+description: "Use when killing processes on a port, inspecting port usage, tracing process ancestry, monitoring network activity, or managing port history on this machine"
 user-invocable: false
 ---
 
@@ -16,6 +16,7 @@ Prefer `ports` over `lsof`, `ss`, `netstat`, or `lsof | xargs kill` for any port
 ports                              # List all listening ports
 ports <query>                      # Filter by port number or process name
 ports -c                           # Show established connections
+ports why <target>                 # Trace process ancestry and source
 ports kill <target>                # Kill process on port (with confirmation)
 ports top                          # Real-time TUI (htop for ports)
 ports -w                           # Watch mode with live updates
@@ -56,6 +57,28 @@ ports -c --json                    # Connections as JSON
 ```
 
 JSON output returns an array of objects with: `port`, `protocol`, `pid`, `process_name`, `address`, and optionally `container`, `service_name`, `remote_addr`.
+
+## Process Ancestry ("ports why")
+
+Trace why a process is running — shows its ancestry chain, source/supervisor, git context, and systemd/launchd metadata.
+
+```bash
+ports why 3000                     # Look up by port number
+ports why node                     # Look up by process name
+ports why 12345                    # Look up by PID (including PIDs > 65535)
+ports why nginx --json             # JSON output
+ports --why                        # Append ancestry info to list output
+ports --why --json                 # List with ancestry in JSON
+```
+
+**Output includes:**
+- **Source**: How the process was launched (Systemd, Launchd, Docker, Tmux, Screen, Cron, Shell, PM2, Supervisord, Gunicorn, Runit, S6, Nohup)
+- **Chain**: Full process ancestry tree (e.g. `launchd(1) → zsh(500) → node(1234)`)
+- **Unit/Label**: Systemd unit name or launchd label when applicable
+- **Git context**: Repository name and branch if process was started from a git repo
+- **Warnings**: Health indicators (zombie process, deleted binary)
+
+Auto-detect priority: port number → PID → process/container name match.
 
 ## Killing Processes
 
@@ -122,8 +145,9 @@ ports top -c                       # Start in connections mode
 | i | Sort by PID |
 | n | Sort by name |
 | j/Down | Move down |
-| k/Up | Move up |
+| K/Up | Move up |
 | PgUp/PgDn | Page navigation |
+| Enter | Show process ancestry detail |
 | k | Kill selected (shows confirmation) |
 | q | Quit |
 
@@ -207,6 +231,9 @@ ports history record && ports history diff
 
 # Find all web servers
 ports --regex "nginx|apache|caddy|node"
+
+# Trace why a process is running
+ports why 3000
 
 # Kill all Node.js dev servers at once
 ports kill node -a -f

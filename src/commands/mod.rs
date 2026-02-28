@@ -2,3 +2,4 @@ pub mod history;
 pub mod kill;
 pub mod list;
 pub mod query;
+pub mod why;

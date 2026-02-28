@@ -40,6 +40,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub regex: bool,
 
+    /// Show process ancestry and source information
+    #[arg(long, global = true)]
+    pub why: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -86,6 +90,11 @@ pub enum Commands {
         /// Shell to generate completions for
         #[arg(value_enum)]
         shell: Shell,
+    },
+    /// Show why a process is running (ancestry, source, supervisor)
+    Why {
+        /// Port number, process name, or PID to investigate
+        target: String,
     },
     /// Track port usage over time
     History {

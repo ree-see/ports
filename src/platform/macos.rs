@@ -84,9 +84,9 @@ mod tests {
     #[test]
     fn test_parse_lsof_line_established() {
         let line = "node      12345 user   23u  IPv4 0x1234567890abcdef      0t0  TCP 127.0.0.1:3000->192.168.1.5:54321 (ESTABLISHED)";
-        
+
         let result = parse_lsof_line(line).unwrap();
-        
+
         assert_eq!(result.process_name, "node");
         assert_eq!(result.pid, 12345);
         assert_eq!(result.port, 3000);
@@ -97,10 +97,11 @@ mod tests {
 
     #[test]
     fn test_parse_lsof_line_listen() {
-        let line = "node      12345 user   24u  IPv4 0x1234567890abcdef      0t0  TCP *:3000 (LISTEN)";
-        
+        let line =
+            "node      12345 user   24u  IPv4 0x1234567890abcdef      0t0  TCP *:3000 (LISTEN)";
+
         let result = parse_lsof_line(line).unwrap();
-        
+
         assert_eq!(result.port, 3000);
         assert!(result.remote_address.is_none());
     }
@@ -110,16 +111,19 @@ mod tests {
         let output = "COMMAND   PID USER  FD  TYPE DEVICE SIZE/OFF NODE NAME
 node      12345 user   23u  IPv4 0x123      0t0  TCP 127.0.0.1:3000->192.168.1.5:54321 (ESTABLISHED)
 node      12345 user   24u  IPv4 0x456      0t0  TCP *:3000 (LISTEN)";
-        
+
         let result = parse_lsof_output(output);
-        
+
         assert_eq!(result.len(), 1);
         assert!(result[0].remote_address.is_some());
     }
 
     #[test]
     fn test_extract_local_port_established() {
-        assert_eq!(extract_local_port("127.0.0.1:3000->192.168.1.5:54321"), Some(3000));
+        assert_eq!(
+            extract_local_port("127.0.0.1:3000->192.168.1.5:54321"),
+            Some(3000)
+        );
     }
 
     #[test]

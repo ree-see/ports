@@ -18,10 +18,10 @@ fn db_path() -> Result<PathBuf> {
     let data_dir = dirs::data_local_dir()
         .or_else(dirs::home_dir)
         .context("Could not determine data directory")?;
-    
+
     let ports_dir = data_dir.join("ports");
     std::fs::create_dir_all(&ports_dir)?;
-    
+
     Ok(ports_dir.join(DB_NAME))
 }
 
@@ -55,7 +55,7 @@ fn init_db(conn: &Connection) -> Result<()> {
             CREATE INDEX IF NOT EXISTS idx_ports_snapshot ON ports(snapshot_id);
             CREATE INDEX IF NOT EXISTS idx_ports_port ON ports(port);
             CREATE INDEX IF NOT EXISTS idx_snapshots_unix_ts ON snapshots(unix_ts);
-            "
+            ",
         )?;
         conn.execute_batch("PRAGMA user_version = 1;")?;
     }
@@ -76,27 +76,27 @@ pub fn open_db() -> Result<Connection> {
 pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
     let conn = open_db()?;
     let now = Utc::now();
-    
+
     // Get current ports
     let mut all_ports = platform::get_listening_ports()?;
     if include_connections {
         all_ports.extend(platform::get_connections()?);
     }
     let all_ports = PortInfo::enrich_with_docker(all_ports);
-    
+
     // Insert snapshot
     conn.execute(
         "INSERT INTO snapshots (timestamp, unix_ts) VALUES (?1, ?2)",
         params![now.to_rfc3339(), now.timestamp()],
     )?;
     let snapshot_id = conn.last_insert_rowid();
-    
+
     // Insert ports
     let mut stmt = conn.prepare(
         "INSERT INTO ports (snapshot_id, port, protocol, address, pid, process_name, container, state, remote_addr)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
     )?;
-    
+
     for port in &all_ports {
         // Determine state based on whether this is a listening port or connection
         let state: Option<&str> = if port.remote_address.is_some() {
@@ -104,7 +104,7 @@ pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
         } else {
             Some("LISTEN")
         };
-        
+
         stmt.execute(params![
             snapshot_id,
             port.port as i32,
@@ -117,7 +117,7 @@ pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
             port.remote_address,
         ])?;
     }
-    
+
     Ok(RecordResult {
         snapshot_id,
         port_count: all_ports.len(),
@@ -166,44 +166,44 @@ pub struct HistoryEntry {
 /// Get history matching the query
 pub fn get_history(query: &HistoryQuery) -> Result<Vec<HistoryEntry>> {
     let conn = open_db()?;
-    
+
     let mut sql = String::from(
         "SELECT s.timestamp, p.port, p.protocol, p.address, p.pid, p.process_name, p.container, p.state
          FROM ports p
          JOIN snapshots s ON p.snapshot_id = s.id
          WHERE 1=1"
     );
-    
+
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    
+
     if let Some(port) = query.port {
         sql.push_str(" AND p.port = ?");
         params_vec.push(Box::new(port as i32));
     }
-    
+
     if let Some(ref process) = query.process {
         sql.push_str(" AND p.process_name LIKE ?");
         params_vec.push(Box::new(format!("%{}%", process)));
     }
-    
+
     if let Some(hours) = query.hours {
         let cutoff = Utc::now() - Duration::hours(hours);
         sql.push_str(" AND s.unix_ts >= ?");
         params_vec.push(Box::new(cutoff.timestamp()));
     }
-    
+
     sql.push_str(" ORDER BY s.unix_ts DESC LIMIT ?");
     params_vec.push(Box::new(query.limit as i32));
-    
+
     let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-    
+
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
         let ts_str: String = row.get(0)?;
         let timestamp = DateTime::parse_from_rfc3339(&ts_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
-        
+
         Ok(HistoryEntry {
             timestamp,
             port: row.get::<_, i32>(1)? as u16,
@@ -215,52 +215,48 @@ pub fn get_history(query: &HistoryQuery) -> Result<Vec<HistoryEntry>> {
             state: row.get(7)?,
         })
     })?;
-    
+
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// Get summary statistics
 pub fn get_stats() -> Result<HistoryStats> {
     let conn = open_db()?;
-    
-    let snapshot_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM snapshots",
-        [],
-        |row| row.get(0),
-    )?;
-    
-    let total_entries: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ports",
-        [],
-        |row| row.get(0),
-    )?;
-    
-    let oldest: Option<String> = conn.query_row(
-        "SELECT MIN(timestamp) FROM snapshots",
-        [],
-        |row| row.get(0),
-    ).ok();
-    
-    let newest: Option<String> = conn.query_row(
-        "SELECT MAX(timestamp) FROM snapshots",
-        [],
-        |row| row.get(0),
-    ).ok();
-    
-    let unique_ports: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT port) FROM ports",
-        [],
-        |row| row.get(0),
-    )?;
-    
+
+    let snapshot_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM snapshots", [], |row| row.get(0))?;
+
+    let total_entries: i64 = conn.query_row("SELECT COUNT(*) FROM ports", [], |row| row.get(0))?;
+
+    let oldest: Option<String> = conn
+        .query_row("SELECT MIN(timestamp) FROM snapshots", [], |row| row.get(0))
+        .ok();
+
+    let newest: Option<String> = conn
+        .query_row("SELECT MAX(timestamp) FROM snapshots", [], |row| row.get(0))
+        .ok();
+
+    let unique_ports: i64 =
+        conn.query_row("SELECT COUNT(DISTINCT port) FROM ports", [], |row| {
+            row.get(0)
+        })?;
+
     let db_size = db_path()?.metadata().map(|m| m.len()).unwrap_or(0);
-    
+
     Ok(HistoryStats {
         snapshot_count: snapshot_count as usize,
         total_entries: total_entries as usize,
         unique_ports: unique_ports as usize,
-        oldest_snapshot: oldest.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-        newest_snapshot: newest.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+        oldest_snapshot: oldest.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
+        newest_snapshot: newest.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
         db_size_bytes: db_size,
     })
 }
@@ -278,29 +274,29 @@ pub struct HistoryStats {
 pub fn cleanup(keep_hours: i64) -> Result<CleanupResult> {
     let conn = open_db()?;
     let cutoff = Utc::now() - Duration::hours(keep_hours);
-    
+
     // Count what we're about to delete
     let snapshot_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM snapshots WHERE unix_ts < ?",
         params![cutoff.timestamp()],
         |row| row.get(0),
     )?;
-    
+
     let entry_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM ports WHERE snapshot_id IN (SELECT id FROM snapshots WHERE unix_ts < ?)",
         params![cutoff.timestamp()],
         |row| row.get(0),
     )?;
-    
+
     // Delete old snapshots (cascades to ports)
     conn.execute(
         "DELETE FROM snapshots WHERE unix_ts < ?",
         params![cutoff.timestamp()],
     )?;
-    
+
     // Vacuum to reclaim space
     conn.execute_batch("VACUUM;")?;
-    
+
     Ok(CleanupResult {
         snapshots_deleted: snapshot_count as usize,
         entries_deleted: entry_count as usize,
@@ -315,15 +311,15 @@ pub struct CleanupResult {
 /// Get the most frequently used ports
 pub fn get_top_ports(limit: usize) -> Result<Vec<(u16, String, usize)>> {
     let conn = open_db()?;
-    
+
     let mut stmt = conn.prepare(
         "SELECT port, protocol, COUNT(*) as cnt
          FROM ports
          GROUP BY port, protocol
          ORDER BY cnt DESC
-         LIMIT ?"
+         LIMIT ?",
     )?;
-    
+
     let rows = stmt.query_map(params![limit as i32], |row| {
         Ok((
             row.get::<_, i32>(0)? as u16,
@@ -331,7 +327,7 @@ pub fn get_top_ports(limit: usize) -> Result<Vec<(u16, String, usize)>> {
             row.get::<_, i64>(2)? as usize,
         ))
     })?;
-    
+
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
@@ -339,21 +335,21 @@ pub fn get_top_ports(limit: usize) -> Result<Vec<(u16, String, usize)>> {
 pub fn get_port_timeline(port: u16, hours: i64) -> Result<Vec<PortTimelineEntry>> {
     let conn = open_db()?;
     let cutoff = Utc::now() - Duration::hours(hours);
-    
+
     let mut stmt = conn.prepare(
         "SELECT s.timestamp, p.protocol, p.process_name, p.container, p.state
          FROM ports p
          JOIN snapshots s ON p.snapshot_id = s.id
          WHERE p.port = ? AND s.unix_ts >= ?
-         ORDER BY s.unix_ts ASC"
+         ORDER BY s.unix_ts ASC",
     )?;
-    
+
     let rows = stmt.query_map(params![port as i32, cutoff.timestamp()], |row| {
         let ts_str: String = row.get(0)?;
         let timestamp = DateTime::parse_from_rfc3339(&ts_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
-        
+
         Ok(PortTimelineEntry {
             timestamp,
             protocol: row.get(1)?,
@@ -362,7 +358,7 @@ pub fn get_port_timeline(port: u16, hours: i64) -> Result<Vec<PortTimelineEntry>
             state: row.get(4)?,
         })
     })?;
-    
+
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
@@ -399,9 +395,7 @@ pub fn get_diff(snapshots_ago: usize) -> Result<Vec<DiffEntry>> {
     let conn = open_db()?;
 
     // Get the (snapshots_ago + 1) most recent snapshot IDs, ordered desc
-    let mut stmt = conn.prepare(
-        "SELECT id FROM snapshots ORDER BY unix_ts DESC LIMIT ?"
-    )?;
+    let mut stmt = conn.prepare("SELECT id FROM snapshots ORDER BY unix_ts DESC LIMIT ?")?;
     let ids: Vec<i64> = stmt
         .query_map(params![(snapshots_ago + 1) as i64], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
@@ -424,7 +418,7 @@ pub fn get_diff(snapshots_ago: usize) -> Result<Vec<DiffEntry>> {
                  AND o.port = p.port
                  AND o.protocol = p.protocol
            )
-         ORDER BY p.port ASC"
+         ORDER BY p.port ASC",
     )?;
     let appeared: Vec<DiffEntry> = stmt
         .query_map(params![latest_id, older_id], |r| {
@@ -448,7 +442,7 @@ pub fn get_diff(snapshots_ago: usize) -> Result<Vec<DiffEntry>> {
                  AND n.port = p.port
                  AND n.protocol = p.protocol
            )
-         ORDER BY p.port ASC"
+         ORDER BY p.port ASC",
     )?;
     let disappeared: Vec<DiffEntry> = stmt
         .query_map(params![older_id, latest_id], |r| {
@@ -470,7 +464,7 @@ pub fn get_diff(snapshots_ago: usize) -> Result<Vec<DiffEntry>> {
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
-    
+
     if bytes >= MB {
         format!("{:.1} MB", bytes as f64 / MB as f64)
     } else if bytes >= KB {

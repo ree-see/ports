@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 use anyhow::{bail, Context, Result};
+use colored::Colorize;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 
+use crate::ancestry;
 use crate::platform;
 use crate::types::PortInfo;
 
@@ -49,6 +51,26 @@ pub fn execute(target: &str, force: bool, all: bool, connections: bool) -> Resul
             process_name,
             port_list.join(", ")
         );
+
+        // Show supervisor warning if managed by a restart-capable service manager.
+        if let Some(a) = ancestry::get_ancestry(*pid, process_name) {
+            let unit_or_label = a.systemd_unit.as_deref().or(a.launchd_label.as_deref());
+            match a.source {
+                ancestry::SourceType::Systemd | ancestry::SourceType::Launchd => {
+                    let manager = format!("{}", a.source);
+                    let detail = unit_or_label
+                        .map(|u| format!(" ({})", u))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "  {} Managed by {}{}. Process will likely restart.",
+                        "Note:".yellow().bold(),
+                        manager,
+                        detail
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 
     if !force && !confirm_kill()? {

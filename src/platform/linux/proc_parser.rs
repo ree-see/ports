@@ -177,9 +177,9 @@ mod tests {
     #[test]
     fn test_parse_socket_line_listening_ipv4() {
         let line = "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000   500        0 12345 1 0000000000000000 100 0 0 10 0";
-        
+
         let result = parse_socket_line(line).unwrap();
-        
+
         assert_eq!(result.local_addr, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(result.local_port, 8080);
         assert_eq!(result.remote_addr, IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
@@ -191,12 +191,15 @@ mod tests {
     #[test]
     fn test_parse_socket_line_established_ipv4() {
         let line = "   1: 0100007F:1F90 0501A8C0:D431 01 00000000:00000000 00:00000000 00000000   500        0 12346 1 0000000000000000 100 0 0 10 0";
-        
+
         let result = parse_socket_line(line).unwrap();
-        
+
         assert_eq!(result.local_addr, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(result.local_port, 8080);
-        assert_eq!(result.remote_addr, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)));
+        assert_eq!(
+            result.remote_addr,
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5))
+        );
         assert_eq!(result.remote_port, 54321);
         assert_eq!(result.state, SocketState::Established);
         assert_eq!(result.inode, 12346);
@@ -205,10 +208,13 @@ mod tests {
     #[test]
     fn test_parse_socket_line_ipv6_listening() {
         let line = "   0: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   500        0 12347 1 0000000000000000 100 0 0 10 0";
-        
+
         let result = parse_socket_line(line).unwrap();
-        
-        assert_eq!(result.local_addr, IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));
+
+        assert_eq!(
+            result.local_addr,
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+        );
         assert_eq!(result.local_port, 8080);
         assert_eq!(result.state, SocketState::Listen);
     }
@@ -217,9 +223,9 @@ mod tests {
     fn test_parse_proc_net_file_skips_header() {
         let content = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000   500        0 12345 1 0000000000000000 100 0 0 10 0";
-        
+
         let result = parse_proc_net_file(content);
-        
+
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].local_port, 8080);
     }
@@ -229,9 +235,9 @@ mod tests {
         let content = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000   500        0 12345 1 0000000000000000 100 0 0 10 0
    1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12346 1 0000000000000000 100 0 0 10 0";
-        
+
         let result = parse_proc_net_file(content);
-        
+
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].local_port, 8080);
         assert_eq!(result[1].local_port, 80);
