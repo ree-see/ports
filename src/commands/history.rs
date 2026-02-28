@@ -3,14 +3,16 @@
 use anyhow::Result;
 use chrono::Local;
 use colored::Colorize;
-use comfy_table::{presets::UTF8_FULL_CONDENSED, Attribute, Cell, Color, ContentArrangement, Table};
+use comfy_table::{
+    presets::UTF8_FULL_CONDENSED, Attribute, Cell, Color, ContentArrangement, Table,
+};
 
 use crate::history::{self, DiffAction, HistoryQuery};
 
 /// Record a snapshot of current port state
 pub fn record(include_connections: bool, json: bool) -> Result<()> {
     let result = history::record_snapshot(include_connections)?;
-    
+
     if json {
         let output = serde_json::json!({
             "snapshot_id": result.snapshot_id,
@@ -23,47 +25,59 @@ pub fn record(include_connections: bool, json: bool) -> Result<()> {
             "{} Recorded {} ports at {}",
             "✓".green(),
             result.port_count.to_string().cyan(),
-            result.timestamp.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S")
+            result
+                .timestamp
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
         );
     }
-    
+
     Ok(())
 }
 
 /// Show history for a port or process
-pub fn show(port: Option<u16>, process: Option<String>, hours: Option<i64>, limit: usize, json: bool) -> Result<()> {
+pub fn show(
+    port: Option<u16>,
+    process: Option<String>,
+    hours: Option<i64>,
+    limit: usize,
+    json: bool,
+) -> Result<()> {
     let query = HistoryQuery {
         port,
         process,
         hours,
         limit,
     };
-    
+
     let entries = history::get_history(&query)?;
-    
+
     if json {
-        let output: Vec<_> = entries.iter().map(|e| {
-            serde_json::json!({
-                "timestamp": e.timestamp.to_rfc3339(),
-                "port": e.port,
-                "protocol": e.protocol,
-                "address": e.address,
-                "pid": e.pid,
-                "process_name": e.process_name,
-                "container": e.container,
-                "state": e.state,
+        let output: Vec<_> = entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "timestamp": e.timestamp.to_rfc3339(),
+                    "port": e.port,
+                    "protocol": e.protocol,
+                    "address": e.address,
+                    "pid": e.pid,
+                    "process_name": e.process_name,
+                    "container": e.container,
+                    "state": e.state,
+                })
             })
-        }).collect();
+            .collect();
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
-    
+
     if entries.is_empty() {
         println!("{}", "No history found matching your query.".yellow());
         println!("Run {} to start recording.", "ports history record".cyan());
         return Ok(());
     }
-    
+
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL_CONDENSED)
@@ -75,24 +89,24 @@ pub fn show(port: Option<u16>, process: Option<String>, hours: Option<i64>, limi
             Cell::new("Process").add_attribute(Attribute::Bold),
             Cell::new("State").add_attribute(Attribute::Bold),
         ]);
-    
+
     for entry in entries {
         let local_time = entry.timestamp.with_timezone(&Local);
         let time_str = local_time.format("%m-%d %H:%M").to_string();
-        
+
         let process_display = if let Some(ref container) = entry.container {
             format!("{} ({})", entry.process_name, container)
         } else {
             entry.process_name.clone()
         };
-        
+
         let state_cell = match entry.state.as_deref() {
             Some("LISTEN") => Cell::new("LISTEN").fg(Color::Green),
             Some("ESTABLISHED") => Cell::new("ESTABLISHED").fg(Color::Cyan),
             Some(s) => Cell::new(s).fg(Color::Yellow),
             None => Cell::new("-"),
         };
-        
+
         table.add_row(vec![
             Cell::new(time_str),
             Cell::new(entry.port).fg(Color::Cyan),
@@ -101,7 +115,7 @@ pub fn show(port: Option<u16>, process: Option<String>, hours: Option<i64>, limi
             state_cell,
         ]);
     }
-    
+
     println!("{table}");
     Ok(())
 }
@@ -110,7 +124,7 @@ pub fn show(port: Option<u16>, process: Option<String>, hours: Option<i64>, limi
 pub fn stats(json: bool) -> Result<()> {
     let stats = history::get_stats()?;
     let top_ports = history::get_top_ports(10)?;
-    
+
     if json {
         let output = serde_json::json!({
             "snapshot_count": stats.snapshot_count,
@@ -130,23 +144,35 @@ pub fn stats(json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
-    
+
     println!("{}", "📊 History Statistics".bold());
     println!();
-    println!("  Snapshots:    {}", stats.snapshot_count.to_string().cyan());
+    println!(
+        "  Snapshots:    {}",
+        stats.snapshot_count.to_string().cyan()
+    );
     println!("  Port entries: {}", stats.total_entries.to_string().cyan());
     println!("  Unique ports: {}", stats.unique_ports.to_string().cyan());
-    println!("  Database:     {}", history::format_bytes(stats.db_size_bytes).cyan());
-    
+    println!(
+        "  Database:     {}",
+        history::format_bytes(stats.db_size_bytes).cyan()
+    );
+
     if let Some(oldest) = stats.oldest_snapshot {
         let local = oldest.with_timezone(&Local);
-        println!("  Oldest:       {}", local.format("%Y-%m-%d %H:%M").to_string().dimmed());
+        println!(
+            "  Oldest:       {}",
+            local.format("%Y-%m-%d %H:%M").to_string().dimmed()
+        );
     }
     if let Some(newest) = stats.newest_snapshot {
         let local = newest.with_timezone(&Local);
-        println!("  Newest:       {}", local.format("%Y-%m-%d %H:%M").to_string().dimmed());
+        println!(
+            "  Newest:       {}",
+            local.format("%Y-%m-%d %H:%M").to_string().dimmed()
+        );
     }
-    
+
     if !top_ports.is_empty() {
         println!();
         println!("{}", "🔝 Most Recorded Ports".bold());
@@ -159,48 +185,61 @@ pub fn stats(json: bool) -> Result<()> {
             );
         }
     }
-    
+
     Ok(())
 }
 
 /// Show timeline for a specific port
 pub fn timeline(port: u16, hours: i64, json: bool) -> Result<()> {
     let entries = history::get_port_timeline(port, hours)?;
-    
+
     if json {
-        let output: Vec<_> = entries.iter().map(|e| {
-            serde_json::json!({
-                "timestamp": e.timestamp.to_rfc3339(),
-                "protocol": e.protocol,
-                "process_name": e.process_name,
-                "container": e.container,
-                "state": e.state,
+        let output: Vec<_> = entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "timestamp": e.timestamp.to_rfc3339(),
+                    "protocol": e.protocol,
+                    "process_name": e.process_name,
+                    "container": e.container,
+                    "state": e.state,
+                })
             })
-        }).collect();
+            .collect();
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
-    
+
     if entries.is_empty() {
-        println!("{}", format!("No history found for port {} in the last {} hours.", port, hours).yellow());
+        println!(
+            "{}",
+            format!(
+                "No history found for port {} in the last {} hours.",
+                port, hours
+            )
+            .yellow()
+        );
         return Ok(());
     }
-    
-    println!("{}", format!("📅 Timeline for port {} (last {} hours)", port, hours).bold());
+
+    println!(
+        "{}",
+        format!("📅 Timeline for port {} (last {} hours)", port, hours).bold()
+    );
     println!();
-    
+
     let mut prev_process: Option<String> = None;
-    
+
     for entry in entries {
         let local_time = entry.timestamp.with_timezone(&Local);
         let time_str = local_time.format("%m-%d %H:%M:%S").to_string();
-        
+
         let process_display = if let Some(ref container) = entry.container {
             format!("{} ({})", entry.process_name, container)
         } else {
             entry.process_name.clone()
         };
-        
+
         // Show change indicator
         let indicator = if prev_process.as_ref() != Some(&process_display) {
             prev_process = Some(process_display.clone());
@@ -208,9 +247,9 @@ pub fn timeline(port: u16, hours: i64, json: bool) -> Result<()> {
         } else {
             "·".dimmed()
         };
-        
+
         let state_str = entry.state.as_deref().unwrap_or("-");
-        
+
         println!(
             "  {} {} {} {} {}",
             time_str.dimmed(),
@@ -220,7 +259,7 @@ pub fn timeline(port: u16, hours: i64, json: bool) -> Result<()> {
             state_str.dimmed()
         );
     }
-    
+
     Ok(())
 }
 
@@ -265,14 +304,8 @@ pub fn diff(ago: usize, json: bool) -> Result<()> {
 
     for entry in &entries {
         let (action_cell, port_color) = match entry.action {
-            DiffAction::Appeared => (
-                Cell::new("appeared").fg(Color::Green),
-                Color::Green,
-            ),
-            DiffAction::Disappeared => (
-                Cell::new("disappeared").fg(Color::Red),
-                Color::Red,
-            ),
+            DiffAction::Appeared => (Cell::new("appeared").fg(Color::Green), Color::Green),
+            DiffAction::Disappeared => (Cell::new("disappeared").fg(Color::Red), Color::Red),
         };
 
         table.add_row(vec![
@@ -290,7 +323,7 @@ pub fn diff(ago: usize, json: bool) -> Result<()> {
 /// Clean up old history
 pub fn cleanup(keep_hours: i64, json: bool) -> Result<()> {
     let result = history::cleanup(keep_hours)?;
-    
+
     if json {
         let output = serde_json::json!({
             "snapshots_deleted": result.snapshots_deleted,
@@ -305,6 +338,6 @@ pub fn cleanup(keep_hours: i64, json: bool) -> Result<()> {
             result.entries_deleted.to_string().cyan()
         );
     }
-    
+
     Ok(())
 }

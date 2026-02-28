@@ -88,7 +88,8 @@ async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
                 if p.typ != Some(PortTypeEnum::TCP) && p.typ != Some(PortTypeEnum::UDP) {
                     continue;
                 }
-                if let (Some(host_port), Some(private_port)) = (p.public_port, Some(p.private_port)) {
+                if let (Some(host_port), Some(private_port)) = (p.public_port, Some(p.private_port))
+                {
                     port_pairs.push((host_port, private_port));
                 }
             }

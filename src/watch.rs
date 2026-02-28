@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::ancestry;
 use crate::cli::{ProtocolFilter, SortField};
 use crate::output::{json, table};
 use crate::platform;
@@ -18,6 +19,7 @@ pub struct WatchOptions {
     pub sort: Option<SortField>,
     pub protocol: Option<ProtocolFilter>,
     pub use_regex: bool,
+    pub why: bool,
 }
 
 pub fn run(options: WatchOptions) -> Result<()> {
@@ -37,13 +39,22 @@ pub fn run(options: WatchOptions) -> Result<()> {
         let mut filtered = filter_ports(ports, &options.filter, options.use_regex)?;
         PortInfo::sort_vec(&mut filtered, options.sort);
 
-        if options.json {
+        if options.why {
+            let pids_with_names: Vec<(u32, &str)> = filtered
+                .iter()
+                .map(|p| (p.pid, p.process_name.as_str()))
+                .collect();
+            let ancestry_map = ancestry::get_ancestry_batch(&pids_with_names);
+            if options.json {
+                json::print_ports_why(&filtered, &ancestry_map);
+            } else {
+                table::print_ports_why(&filtered, &ancestry_map);
+            }
+        } else if options.json {
             json::print_ports(&filtered);
         } else {
-            let new_ports: HashSet<&PortInfo> = filtered
-                .iter()
-                .filter(|p| !previous.contains(*p))
-                .collect();
+            let new_ports: HashSet<&PortInfo> =
+                filtered.iter().filter(|p| !previous.contains(*p)).collect();
 
             table::print_ports_watch(&filtered, &new_ports);
         }
@@ -56,7 +67,11 @@ pub fn run(options: WatchOptions) -> Result<()> {
     }
 }
 
-fn filter_ports(ports: Vec<PortInfo>, filter: &Option<String>, use_regex: bool) -> anyhow::Result<Vec<PortInfo>> {
+fn filter_ports(
+    ports: Vec<PortInfo>,
+    filter: &Option<String>,
+    use_regex: bool,
+) -> anyhow::Result<Vec<PortInfo>> {
     match filter {
         None => Ok(ports),
         Some(query) => PortInfo::filter_by_query(ports, query, use_regex),

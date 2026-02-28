@@ -19,6 +19,7 @@
 //! - **macOS**: Uses `lsof` for connections, `listeners` crate for listening ports
 //! - **Others**: Generic fallback via `listeners` crate
 
+pub mod ancestry;
 pub mod cli;
 pub mod commands;
 pub mod docker;
@@ -58,6 +59,9 @@ pub fn run(cli: Cli) -> Result<()> {
             Some(cli::Commands::Top { .. }) => {
                 anyhow::bail!("Cannot use --watch with top command (top has its own refresh)");
             }
+            Some(cli::Commands::Why { .. }) => {
+                anyhow::bail!("Cannot use --watch with why command");
+            }
             Some(cli::Commands::History { .. }) => {
                 anyhow::bail!("Cannot use --watch with history command");
             }
@@ -72,50 +76,56 @@ pub fn run(cli: Cli) -> Result<()> {
             sort: cli.sort,
             protocol: cli.protocol,
             use_regex: cli.regex,
+            why: cli.why,
         });
     }
 
     match &cli.command {
         Some(cli::Commands::List) => {
-            commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol)
+            commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol, cli.why)
         }
-        Some(cli::Commands::Kill { target, force, all, connections }) => {
-            commands::kill::execute(target, *force, *all, *connections)
-        }
-        Some(cli::Commands::Top { connections }) => {
-            top::run(*connections)
-        }
+        Some(cli::Commands::Kill {
+            target,
+            force,
+            all,
+            connections,
+        }) => commands::kill::execute(target, *force, *all, *connections),
+        Some(cli::Commands::Why { target }) => commands::why::execute(target, cli.json),
+        Some(cli::Commands::Top { connections }) => top::run(*connections),
         Some(cli::Commands::Completions { shell }) => {
             generate(*shell, &mut Cli::command(), "ports", &mut io::stdout());
             Ok(())
         }
-        Some(cli::Commands::History { action }) => {
-            match action {
-                cli::HistoryAction::Record { connections } => {
-                    commands::history::record(*connections, cli.json)
-                }
-                cli::HistoryAction::Show { port, process, hours, limit } => {
-                    commands::history::show(*port, process.clone(), Some(*hours), *limit, cli.json)
-                }
-                cli::HistoryAction::Timeline { port, hours } => {
-                    commands::history::timeline(*port, *hours, cli.json)
-                }
-                cli::HistoryAction::Stats => {
-                    commands::history::stats(cli.json)
-                }
-                cli::HistoryAction::Clean { keep } => {
-                    commands::history::cleanup(*keep, cli.json)
-                }
-                cli::HistoryAction::Diff { ago } => {
-                    commands::history::diff(*ago, cli.json)
-                }
+        Some(cli::Commands::History { action }) => match action {
+            cli::HistoryAction::Record { connections } => {
+                commands::history::record(*connections, cli.json)
             }
-        }
+            cli::HistoryAction::Show {
+                port,
+                process,
+                hours,
+                limit,
+            } => commands::history::show(*port, process.clone(), Some(*hours), *limit, cli.json),
+            cli::HistoryAction::Timeline { port, hours } => {
+                commands::history::timeline(*port, *hours, cli.json)
+            }
+            cli::HistoryAction::Stats => commands::history::stats(cli.json),
+            cli::HistoryAction::Clean { keep } => commands::history::cleanup(*keep, cli.json),
+            cli::HistoryAction::Diff { ago } => commands::history::diff(*ago, cli.json),
+        },
         None => match &cli.query {
-            Some(query) => {
-                commands::query::execute(query, cli.json, cli.connections, cli.sort, cli.protocol, cli.regex)
+            Some(query) => commands::query::execute(
+                query,
+                cli.json,
+                cli.connections,
+                cli.sort,
+                cli.protocol,
+                cli.regex,
+                cli.why,
+            ),
+            None => {
+                commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol, cli.why)
             }
-            None => commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol),
         },
     }
 }
@@ -137,5 +147,15 @@ fn run_interactive(cli: &Cli) -> Result<()> {
 
     PortInfo::sort_vec(&mut ports, cli.sort);
 
-    interactive::select_and_kill(&ports)
+    let ancestry_map = if cli.why {
+        let pids_with_names: Vec<(u32, &str)> = ports
+            .iter()
+            .map(|p| (p.pid, p.process_name.as_str()))
+            .collect();
+        Some(ancestry::get_ancestry_batch(&pids_with_names))
+    } else {
+        None
+    };
+
+    interactive::select_and_kill(&ports, ancestry_map.as_ref())
 }

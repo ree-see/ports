@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "linux"))]
 pub fn get_listening_ports() -> anyhow::Result<Vec<crate::types::PortInfo>> {
-    use anyhow::anyhow;
     use crate::types::{PortInfo, Protocol};
+    use anyhow::anyhow;
 
     let listeners =
         listeners::get_all().map_err(|e| anyhow!("Failed to get listening ports: {}", e))?;

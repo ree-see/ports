@@ -13,6 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState};
 use ratatui::Terminal;
 
+use crate::ancestry::{self, ProcessAncestry};
 use crate::cli::SortField;
 use crate::commands::kill::kill_process;
 use crate::platform;
@@ -35,6 +36,10 @@ struct TopState {
     confirm_kill: bool,
     /// Transient message shown in header (e.g. "Killed PID 1234").
     status_msg: Option<(String, Instant)>,
+    /// PID for which ancestry detail popup is shown.
+    detail_pid: Option<u32>,
+    /// Cached ancestry for the detail popup.
+    detail_ancestry: Option<ProcessAncestry>,
 }
 
 impl TopState {
@@ -51,6 +56,8 @@ impl TopState {
             seen_ports: HashMap::new(),
             confirm_kill: false,
             status_msg: None,
+            detail_pid: None,
+            detail_ancestry: None,
         }
     }
 }
@@ -58,7 +65,11 @@ impl TopState {
 pub fn run(connections: bool) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::cursor::Hide)?;
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::cursor::Hide
+    )?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -75,11 +86,16 @@ pub fn run(connections: bool) -> Result<()> {
     result
 }
 
-fn run_loop(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>, connections: bool) -> Result<()> {
+fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    connections: bool,
+) -> Result<()> {
     let mut state = TopState::new(connections);
     let poll_timeout = Duration::from_millis(100);
     let refresh_interval = Duration::from_secs(1);
-    let mut last_refresh = Instant::now().checked_sub(refresh_interval).unwrap_or_else(Instant::now);
+    let mut last_refresh = Instant::now()
+        .checked_sub(refresh_interval)
+        .unwrap_or_else(Instant::now);
     let mut ports: Vec<PortInfo> = Vec::new();
     let new_threshold = Duration::from_secs(3);
     let status_display_duration = Duration::from_secs(3);
@@ -137,10 +153,34 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>, connecti
                             state.confirm_kill = false;
                         }
                     }
+                } else if state.detail_pid.is_some() {
+                    // Dismiss detail popup on any key.
+                    match key.code {
+                        KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
+                            state.detail_pid = None;
+                            state.detail_ancestry = None;
+                        }
+                        _ => {
+                            state.detail_pid = None;
+                            state.detail_ancestry = None;
+                        }
+                    }
                 } else {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            break
+                        }
+
+                        // Show ancestry detail for selected process.
+                        KeyCode::Enter => {
+                            if let Some(port) = ports.get(state.selected) {
+                                let pid = port.pid;
+                                state.detail_pid = Some(pid);
+                                state.detail_ancestry =
+                                    ancestry::get_ancestry(pid, &port.process_name);
+                            }
+                        }
 
                         // Toggle mode
                         KeyCode::Tab => {
@@ -252,21 +292,20 @@ fn draw(
     };
 
     let header_text = if let Some((ref msg, _)) = state.status_msg {
-        Line::from(vec![
-            Span::styled(msg.clone(), Style::default().fg(Color::Yellow)),
-        ])
+        Line::from(vec![Span::styled(
+            msg.clone(),
+            Style::default().fg(Color::Yellow),
+        )])
     } else {
-        Line::from(vec![
-            Span::styled(
-                format!(
-                    "ports top - {} ({} entries, sorted by {})",
-                    mode_str,
-                    ports.len(),
-                    sort_str
-                ),
-                Style::default().fg(Color::Cyan),
+        Line::from(vec![Span::styled(
+            format!(
+                "ports top - {} ({} entries, sorted by {})",
+                mode_str,
+                ports.len(),
+                sort_str
             ),
-        ])
+            Style::default().fg(Color::Cyan),
+        )])
     };
     frame.render_widget(Paragraph::new(header_text), chunks[0]);
 
@@ -280,7 +319,10 @@ fn draw(
         .len();
 
     let stats_text = Line::from(vec![Span::styled(
-        format!("TCP: {}  UDP: {}  Processes: {}", tcp_count, udp_count, process_count),
+        format!(
+            "TCP: {}  UDP: {}  Processes: {}",
+            tcp_count, udp_count, process_count
+        ),
         Style::default().fg(Color::DarkGray),
     )]);
     frame.render_widget(Paragraph::new(stats_text), chunks[1]);
@@ -303,7 +345,11 @@ fn draw(
     };
 
     let header = Row::new(header_cells.iter().map(|h| {
-        Cell::from(*h).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
     }));
 
     let rows: Vec<Row> = ports
@@ -393,7 +439,7 @@ fn draw(
         )])
     } else {
         Line::from(vec![Span::styled(
-            "q:Quit  Tab:Toggle  p/i/n:Sort  ↑↓/j/K:Navigate  PgUp/PgDn:Page  k:Kill",
+            "q:Quit  Tab:Toggle  p/i/n:Sort  ↑↓/j/K:Nav  PgUp/PgDn:Page  Enter:Info  k:Kill",
             Style::default().fg(Color::DarkGray),
         )])
     };
@@ -416,6 +462,92 @@ fn draw(
                 popup_area,
             );
         }
+    }
+
+    // ── Ancestry detail popup ───────────────────────────────────────────────
+    if let Some(detail_pid) = state.detail_pid {
+        let mut lines: Vec<Line> = Vec::new();
+
+        if let Some(ref a) = state.detail_ancestry {
+            lines.push(Line::from(vec![
+                Span::styled("Source:  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{}", a.source), Style::default().fg(Color::Green)),
+            ]));
+
+            if let Some(ref unit) = a.systemd_unit {
+                lines.push(Line::from(vec![
+                    Span::styled("Unit:    ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(unit.clone(), Style::default()),
+                ]));
+            }
+
+            if let Some(ref label) = a.launchd_label {
+                lines.push(Line::from(vec![
+                    Span::styled("Label:   ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(label.clone(), Style::default()),
+                ]));
+            }
+
+            let chain_str: String = a
+                .chain
+                .iter()
+                .rev()
+                .map(|anc| format!("{}({})", anc.name, anc.pid))
+                .collect::<Vec<_>>()
+                .join(" → ");
+            lines.push(Line::from(vec![
+                Span::styled("Chain:   ", Style::default().fg(Color::DarkGray)),
+                Span::styled(chain_str, Style::default()),
+            ]));
+
+            if let Some(ref git) = a.git_context {
+                let branch_str = git
+                    .branch
+                    .as_deref()
+                    .map(|b| format!(" ({})", b))
+                    .unwrap_or_default();
+                lines.push(Line::from(vec![
+                    Span::styled("Git:     ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{}{}", git.repo_name, branch_str),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                ]));
+            }
+
+            if !a.warnings.is_empty() {
+                let w_str: String = a
+                    .warnings
+                    .iter()
+                    .map(|w| format!("{}", w))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(Line::from(vec![
+                    Span::styled("Warnings:", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!(" {}", w_str), Style::default().fg(Color::Red)),
+                ]));
+            }
+        } else {
+            lines.push(Line::from(Span::styled(
+                "Ancestry data unavailable",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        let popup_height = (lines.len() as u16) + 2; // +2 for borders
+        let popup_area = centered_rect(70, popup_height, area);
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!("Process Info - PID {}", detail_pid))
+                        .title_alignment(Alignment::Center),
+                )
+                .style(Style::default()),
+            popup_area,
+        );
     }
 }
 

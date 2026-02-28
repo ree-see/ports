@@ -73,7 +73,11 @@ impl PortInfo {
     ///
     /// When `use_regex` is true, the query is compiled as a regex. Returns an
     /// `Err` with a clear message if the regex is invalid.
-    pub fn filter_by_query(ports: Vec<PortInfo>, query: &str, use_regex: bool) -> Result<Vec<PortInfo>> {
+    pub fn filter_by_query(
+        ports: Vec<PortInfo>,
+        query: &str,
+        use_regex: bool,
+    ) -> Result<Vec<PortInfo>> {
         if use_regex {
             let re = Regex::new(query)
                 .map_err(|e| anyhow::anyhow!("Invalid regex '{}': {}", query, e))?;
@@ -109,21 +113,36 @@ impl PortInfo {
     pub fn filter_protocol(ports: Vec<PortInfo>, filter: Option<ProtocolFilter>) -> Vec<PortInfo> {
         match filter {
             None => ports,
-            Some(ProtocolFilter::Tcp) => {
-                ports.into_iter().filter(|p| p.protocol == Protocol::Tcp).collect()
-            }
-            Some(ProtocolFilter::Udp) => {
-                ports.into_iter().filter(|p| p.protocol == Protocol::Udp).collect()
-            }
+            Some(ProtocolFilter::Tcp) => ports
+                .into_iter()
+                .filter(|p| p.protocol == Protocol::Tcp)
+                .collect(),
+            Some(ProtocolFilter::Udp) => ports
+                .into_iter()
+                .filter(|p| p.protocol == Protocol::Udp)
+                .collect(),
         }
     }
 
+    /// Check whether this port is bound to a public/wildcard address.
+    ///
+    /// Returns `true` for `0.0.0.0`, `::`, `*`, and `[::]` prefixes.
+    pub fn is_public_binding(&self) -> bool {
+        let addr = &self.address;
+        addr.starts_with("0.0.0.0:")
+            || addr.starts_with(":::")
+            || addr.starts_with("*:")
+            || addr.starts_with("[::]:")
+    }
+
     /// Enrich ports with Docker container information.
-    /// 
+    ///
     /// For ports forwarded by `docker-proxy`, adds the container name.
     pub fn enrich_with_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
         // Only fetch Docker info if we have docker-proxy entries
-        let has_docker_proxy = ports.iter().any(|p| p.process_name.contains("docker-proxy"));
+        let has_docker_proxy = ports
+            .iter()
+            .any(|p| p.process_name.contains("docker-proxy"));
         if !has_docker_proxy {
             return ports;
         }
