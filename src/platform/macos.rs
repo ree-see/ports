@@ -63,6 +63,8 @@ fn parse_lsof_line(line: &str) -> Option<PortInfo> {
         remote_address,
         container: None,
         service_name: None,
+        command_line: None,
+        cwd: None,
     })
 }
 
