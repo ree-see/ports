@@ -44,6 +44,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub why: bool,
 
+    /// Show only developer processes
+    #[arg(long, global = true)]
+    pub dev: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
