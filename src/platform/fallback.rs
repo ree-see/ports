@@ -27,3 +27,6 @@ pub fn get_listening_ports() -> anyhow::Result<Vec<crate::types::PortInfo>> {
 
     Ok(ports)
 }
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn resolve_process_details(_ports: &mut [crate::types::PortInfo]) {}
