@@ -7,6 +7,7 @@ use anyhow::Result;
 
 use crate::ancestry;
 use crate::cli::{ProtocolFilter, SortField};
+use crate::filter;
 use crate::framework;
 use crate::output::{json, table};
 use crate::platform;
@@ -22,6 +23,7 @@ pub struct WatchOptions {
     pub protocol: Option<ProtocolFilter>,
     pub use_regex: bool,
     pub why: bool,
+    pub dev: bool,
 }
 
 pub fn run(options: WatchOptions) -> Result<()> {
@@ -37,7 +39,10 @@ pub fn run(options: WatchOptions) -> Result<()> {
         } else {
             platform::get_listening_ports()?
         };
-        let ports = PortInfo::filter_protocol(ports, options.protocol);
+        let mut ports = PortInfo::filter_protocol(ports, options.protocol);
+        if options.dev {
+            filter::retain_dev_only(&mut ports);
+        }
         let mut filtered = filter_ports(ports, &options.filter, options.use_regex)?;
         PortInfo::sort_vec(&mut filtered, options.sort);
 

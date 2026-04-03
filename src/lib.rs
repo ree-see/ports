@@ -80,12 +80,20 @@ pub fn run(cli: Cli) -> Result<()> {
             protocol: cli.protocol,
             use_regex: cli.regex,
             why: cli.why,
+            dev: cli.dev,
         });
     }
 
     match &cli.command {
         Some(cli::Commands::List) => {
-            commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol, cli.why)
+            commands::list::execute(
+                cli.json,
+                cli.connections,
+                cli.sort,
+                cli.protocol,
+                cli.why,
+                cli.dev,
+            )
         }
         Some(cli::Commands::Kill {
             target,
@@ -94,7 +102,9 @@ pub fn run(cli: Cli) -> Result<()> {
             connections,
         }) => commands::kill::execute(target, *force, *all, *connections),
         Some(cli::Commands::Why { target }) => commands::why::execute(target, cli.json),
-        Some(cli::Commands::Top { connections }) => top::run(*connections),
+        Some(cli::Commands::Top { connections }) => {
+            top::run(*connections, cli.dev)
+        }
         Some(cli::Commands::Completions { shell }) => {
             generate(*shell, &mut Cli::command(), "ports", &mut io::stdout());
             Ok(())
@@ -125,9 +135,17 @@ pub fn run(cli: Cli) -> Result<()> {
                 cli.protocol,
                 cli.regex,
                 cli.why,
+                cli.dev,
             ),
             None => {
-                commands::list::execute(cli.json, cli.connections, cli.sort, cli.protocol, cli.why)
+                commands::list::execute(
+                    cli.json,
+                    cli.connections,
+                    cli.sort,
+                    cli.protocol,
+                    cli.why,
+                    cli.dev,
+                )
             }
         },
     }
@@ -141,6 +159,9 @@ fn run_interactive(cli: &Cli) -> Result<()> {
     };
 
     let mut ports = PortInfo::filter_protocol(ports, cli.protocol);
+    if cli.dev {
+        filter::retain_dev_only(&mut ports);
+    }
 
     if let Some(query) = &cli.query {
         ports = PortInfo::filter_by_query(ports, query, cli.regex)?;
