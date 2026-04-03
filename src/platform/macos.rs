@@ -115,9 +115,9 @@ fn parse_ps_output(output: &str) -> HashMap<u32, String> {
 
 /// Parse `lsof -Fn` output for CWD file descriptors.
 ///
-/// Lines starting with `p` set the current PID, `f` set the
-/// current fd type, and `n` provide the path. We capture the
-/// path associated with the `cwd` fd for each PID.
+/// **Caller must pass `-d cwd`** to lsof so that only CWD
+/// entries appear in the output. This parser captures every
+/// `n` line without validating the preceding `f` line type.
 fn parse_lsof_cwd_output(output: &str) -> HashMap<u32, PathBuf> {
     let mut map = HashMap::new();
     let mut current_pid: Option<u32> = None;

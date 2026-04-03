@@ -51,6 +51,11 @@ pub fn find_project_root(cwd: &Path) -> Option<PathBuf> {
     result
 }
 
+#[cfg(test)]
+pub fn clear_cache() {
+    PROJECT_ROOT_CACHE.lock().unwrap().clear();
+}
+
 fn walk_ancestors(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
     for _ in 0..MAX_DEPTH {
@@ -97,8 +102,16 @@ mod tests {
 
     #[test]
     fn test_returns_none_without_markers() {
+        clear_cache();
+        // Create 16 levels so the depth limit kicks in
+        // before we escape the temp dir. This avoids
+        // depending on the host filesystem having no
+        // marker files above the temp directory.
         let tmp = TempDir::new().unwrap();
-        let deep = tmp.path().join("a").join("b").join("c");
+        let mut deep = tmp.path().to_path_buf();
+        for i in 0..16 {
+            deep = deep.join(format!("d{i}"));
+        }
         fs::create_dir_all(&deep).unwrap();
 
         let result = find_project_root(&deep);
