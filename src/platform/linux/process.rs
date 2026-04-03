@@ -158,6 +158,7 @@ mod tests {
                 service_name: None,
                 command_line: None,
                 cwd: None,
+                framework: None,
             },
             PortInfo {
                 port: 443,
@@ -170,6 +171,7 @@ mod tests {
                 service_name: None,
                 command_line: None,
                 cwd: None,
+                framework: None,
             },
         ];
 

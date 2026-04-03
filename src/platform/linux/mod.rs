@@ -96,6 +96,7 @@ fn get_ports(mode: FilterMode) -> Result<Vec<PortInfo>> {
                         service_name: None,
                         command_line: None,
                         cwd: None,
+                        framework: None,
                     });
                 }
             }

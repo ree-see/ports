@@ -32,6 +32,9 @@ pub struct PortInfo {
     /// Working directory of the process.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
+    /// Detected framework or runtime (e.g. "Next.js", "Django").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub framework: Option<String>,
 }
 
 // Manual Hash/Eq excludes command_line and cwd so that watch
@@ -237,7 +240,31 @@ mod tests {
             service_name: None,
             command_line: None,
             cwd: None,
+            framework: None,
         }
+    }
+
+    #[test]
+    fn eq_ignores_framework() {
+        let a = make_port_info();
+        let mut b = make_port_info();
+        b.framework = Some("Next.js".into());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn hash_ignores_framework() {
+        let a = make_port_info();
+        let mut b = make_port_info();
+        b.framework = Some("Next.js".into());
+
+        let mut set = HashSet::new();
+        set.insert(a);
+        assert!(
+            set.contains(&b),
+            "HashSet should treat entries differing \
+             only in framework as identical"
+        );
     }
 
     #[test]
