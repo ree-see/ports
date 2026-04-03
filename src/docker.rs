@@ -28,8 +28,7 @@ impl ContainerInfo {
 type PortCache = Option<(Instant, HashMap<u16, ContainerInfo>)>;
 
 // Global cache: (last_refresh, port_mappings)
-pub(crate) static DOCKER_CACHE: LazyLock<Mutex<PortCache>> =
-    LazyLock::new(|| Mutex::new(None));
+pub(crate) static DOCKER_CACHE: LazyLock<Mutex<PortCache>> = LazyLock::new(|| Mutex::new(None));
 
 const CACHE_TTL: Duration = Duration::from_secs(3);
 
@@ -153,13 +152,9 @@ mod tests {
                 ports: vec![(8080, 5432)],
             },
         );
-        *DOCKER_CACHE.lock().unwrap() =
-            Some((Instant::now(), map));
+        *DOCKER_CACHE.lock().unwrap() = Some((Instant::now(), map));
 
-        assert_eq!(
-            get_container_image(8080),
-            Some("postgres:16".to_string())
-        );
+        assert_eq!(get_container_image(8080), Some("postgres:16".to_string()));
         assert_eq!(get_container_image(9999), None);
 
         // Clean up.
