@@ -28,7 +28,8 @@ impl ContainerInfo {
 type PortCache = Option<(Instant, HashMap<u16, ContainerInfo>)>;
 
 // Global cache: (last_refresh, port_mappings)
-static DOCKER_CACHE: LazyLock<Mutex<PortCache>> = LazyLock::new(|| Mutex::new(None));
+pub(crate) static DOCKER_CACHE: LazyLock<Mutex<PortCache>> =
+    LazyLock::new(|| Mutex::new(None));
 
 const CACHE_TTL: Duration = Duration::from_secs(3);
 

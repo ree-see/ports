@@ -23,6 +23,7 @@ pub mod ancestry;
 pub mod cli;
 pub mod commands;
 pub mod docker;
+pub mod framework;
 pub mod history;
 pub mod interactive;
 pub mod output;
