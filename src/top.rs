@@ -16,8 +16,8 @@ use ratatui::Terminal;
 use crate::ancestry::{self, ProcessAncestry};
 use crate::cli::SortField;
 use crate::commands::kill::kill_process;
-use crate::platform;
 use crate::types::{PortInfo, Protocol};
+use crate::{framework, platform, project};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
@@ -232,6 +232,8 @@ fn run_loop(
 }
 
 fn fetch_ports(state: &TopState) -> Result<Vec<PortInfo>> {
+    project::clear_cache();
+    framework::clear_cache();
     let mut ports = match state.mode {
         ViewMode::Listening => platform::get_listening_ports()?,
         ViewMode::Connections => platform::get_connections()?,

@@ -7,8 +7,10 @@ use anyhow::Result;
 
 use crate::ancestry;
 use crate::cli::{ProtocolFilter, SortField};
+use crate::framework;
 use crate::output::{json, table};
 use crate::platform;
+use crate::project;
 use crate::types::PortInfo;
 
 pub struct WatchOptions {
@@ -27,6 +29,8 @@ pub fn run(options: WatchOptions) -> Result<()> {
 
     loop {
         clear_screen();
+        project::clear_cache();
+        framework::clear_cache();
 
         let ports = if options.connections {
             platform::get_connections()?

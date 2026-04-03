@@ -23,8 +23,6 @@ const MARKERS: &[&str] = &[
 /// Maximum ancestor levels to walk before giving up.
 const MAX_DEPTH: usize = 15;
 
-// No TTL needed yet -- add one when integrated into
-// long-running modes (top/watch).
 static PROJECT_ROOT_CACHE: LazyLock<Mutex<HashMap<PathBuf, Option<PathBuf>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -51,7 +49,10 @@ pub fn find_project_root(cwd: &Path) -> Option<PathBuf> {
     result
 }
 
-#[cfg(test)]
+/// Clear the project root cache.
+///
+/// Called at the start of each watch/top refresh cycle so
+/// that project root changes are picked up.
 pub fn clear_cache() {
     PROJECT_ROOT_CACHE.lock().unwrap().clear();
 }
