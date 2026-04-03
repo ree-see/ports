@@ -2,10 +2,12 @@ use anyhow::Result;
 
 use crate::ancestry;
 use crate::cli::{ProtocolFilter, SortField};
+use crate::filter;
 use crate::output::{json, table};
 use crate::platform;
 use crate::types::PortInfo;
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute(
     query: &str,
     output_json: bool,
@@ -14,6 +16,7 @@ pub fn execute(
     protocol: Option<ProtocolFilter>,
     use_regex: bool,
     why: bool,
+    dev: bool,
 ) -> Result<()> {
     let ports = if connections {
         platform::get_connections()?
@@ -21,7 +24,10 @@ pub fn execute(
         platform::get_listening_ports()?
     };
 
-    let ports = PortInfo::filter_protocol(ports, protocol);
+    let mut ports = PortInfo::filter_protocol(ports, protocol);
+    if dev {
+        filter::retain_dev_only(&mut ports);
+    }
 
     let mut filtered = PortInfo::filter_by_query(ports, query, use_regex)?;
 

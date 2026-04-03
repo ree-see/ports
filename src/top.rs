@@ -17,7 +17,7 @@ use crate::ancestry::{self, ProcessAncestry};
 use crate::cli::SortField;
 use crate::commands::kill::kill_process;
 use crate::types::{PortInfo, Protocol};
-use crate::{framework, platform, project};
+use crate::{filter, framework, platform, project};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
@@ -40,10 +40,12 @@ struct TopState {
     detail_pid: Option<u32>,
     /// Cached ancestry for the detail popup.
     detail_ancestry: Option<ProcessAncestry>,
+    /// Only show developer-relevant processes.
+    dev: bool,
 }
 
 impl TopState {
-    fn new(connections: bool) -> Self {
+    fn new(connections: bool, dev: bool) -> Self {
         Self {
             mode: if connections {
                 ViewMode::Connections
@@ -58,11 +60,12 @@ impl TopState {
             status_msg: None,
             detail_pid: None,
             detail_ancestry: None,
+            dev,
         }
     }
 }
 
-pub fn run(connections: bool) -> Result<()> {
+pub fn run(connections: bool, dev: bool) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     crossterm::execute!(
@@ -74,7 +77,7 @@ pub fn run(connections: bool) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_loop(&mut terminal, connections);
+    let result = run_loop(&mut terminal, connections, dev);
 
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(
@@ -89,8 +92,9 @@ pub fn run(connections: bool) -> Result<()> {
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     connections: bool,
+    dev: bool,
 ) -> Result<()> {
-    let mut state = TopState::new(connections);
+    let mut state = TopState::new(connections, dev);
     let poll_timeout = Duration::from_millis(100);
     let refresh_interval = Duration::from_secs(1);
     let mut last_refresh = Instant::now()
@@ -238,6 +242,9 @@ fn fetch_ports(state: &TopState) -> Result<Vec<PortInfo>> {
         ViewMode::Listening => platform::get_listening_ports()?,
         ViewMode::Connections => platform::get_connections()?,
     };
+    if state.dev {
+        filter::retain_dev_only(&mut ports);
+    }
     PortInfo::sort_vec(&mut ports, Some(state.sort));
     Ok(ports)
 }

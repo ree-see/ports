@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use crate::ancestry;
 use crate::cli::{ProtocolFilter, SortField};
+use crate::filter;
 use crate::output::{json, table};
 use crate::platform;
 use crate::types::PortInfo;
@@ -12,6 +13,7 @@ pub fn execute(
     sort: Option<SortField>,
     protocol: Option<ProtocolFilter>,
     why: bool,
+    dev: bool,
 ) -> Result<()> {
     let ports = if connections {
         platform::get_connections()?
@@ -20,6 +22,9 @@ pub fn execute(
     };
 
     let mut ports = PortInfo::filter_protocol(ports, protocol);
+    if dev {
+        filter::retain_dev_only(&mut ports);
+    }
     PortInfo::sort_vec(&mut ports, sort);
 
     if why {
