@@ -23,7 +23,7 @@ cargo fmt                          # format
 
 The crate is structured as a library (`src/lib.rs`) consumed by a thin binary (`src/main.rs` → `portls::run(cli)`). All subcommand logic lives in the library.
 
-**Data flow**: `lib.rs::run()` dispatches based on CLI flags/subcommands → command handlers call `platform::get_listening_ports()` or `platform::get_connections()` → `PortInfo::enrich_with_docker()` adds container names for `docker-proxy` processes → output via `output::table` or `output::json`.
+**Data flow**: `lib.rs::run()` dispatches based on CLI flags/subcommands → command handlers call `platform::get_listening_ports()` or `platform::get_connections()` → platform pipeline enriches: services → process details (cmdline/cwd) → Docker container names → framework detection → output via `output::table` or `output::json`.
 
 ### Key modules
 
@@ -31,10 +31,13 @@ The crate is structured as a library (`src/lib.rs`) consumed by a thin binary (`
 |--------|---------|
 | `cli` | Clap `Cli` struct, `Commands` enum, `HistoryAction`, `SortField`, `ProtocolFilter` |
 | `types` | `PortInfo` struct + `Protocol` enum; filter/sort helpers |
-| `platform/` | Platform dispatch: Linux uses native `/proc/net`, macOS uses `lsof`, others use `listeners` crate |
-| `platform/linux/` | `proc_parser.rs` parses `/proc/net/{tcp,tcp6,udp,udp6}`, `proc_fd.rs` maps inodes to PIDs |
+| `platform/` | Platform dispatch: `resolve_services` + `enrich_process_details` enrichment pipeline. Linux uses native `/proc/net`, macOS uses `lsof`, others use `listeners` crate |
+| `platform/linux/` | `proc_parser.rs` parses `/proc/net/{tcp,tcp6,udp,udp6}`, `proc_fd.rs` maps inodes to PIDs, `process.rs` reads `/proc/{pid}/cmdline` and `cwd` |
+| `platform/macos` | `lsof`-based connections + batched `ps`/`lsof` for cmdline and CWD resolution |
+| `project` | `find_project_root()` utility: walks up from CWD looking for marker files (Cargo.toml, package.json, etc.) with caching |
 | `commands/` | One file per subcommand: `list`, `query`, `kill`, `history` |
-| `docker` | Calls `docker ps` to map host ports to container names; only invoked when `docker-proxy` processes are detected |
+| `docker` | Uses `bollard` API to map host ports to container names; 3s TTL cache; only invoked when `docker-proxy` processes are detected |
+| `framework` | Framework/runtime detection with 5-tier cascade: Docker image > command patterns > package.json deps > config files > process name. Cached per project root |
 | `history` | SQLite via `rusqlite`: snapshots + ports tables; DB at `~/.local/share/ports/ports_history.db` |
 | `interactive` | `dialoguer`-based interactive kill picker |
 | `watch` | Polling loop with diff highlighting |
