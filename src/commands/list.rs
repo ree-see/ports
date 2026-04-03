@@ -19,9 +19,7 @@ pub fn execute(
         platform::get_listening_ports()?
     };
 
-    let ports = PortInfo::filter_protocol(ports, protocol);
-    // Enrich docker-proxy entries with container names
-    let mut ports = PortInfo::enrich_with_docker(ports);
+    let mut ports = PortInfo::filter_protocol(ports, protocol);
     PortInfo::sort_vec(&mut ports, sort);
 
     if why {

@@ -138,9 +138,7 @@ fn run_interactive(cli: &Cli) -> Result<()> {
         platform::get_listening_ports()?
     };
 
-    let ports = PortInfo::filter_protocol(ports, cli.protocol);
-    // Enrich docker-proxy entries with container names
-    let mut ports = PortInfo::enrich_with_docker(ports);
+    let mut ports = PortInfo::filter_protocol(ports, cli.protocol);
 
     if let Some(query) = &cli.query {
         ports = PortInfo::filter_by_query(ports, query, cli.regex)?;

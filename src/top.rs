@@ -236,7 +236,6 @@ fn fetch_ports(state: &TopState) -> Result<Vec<PortInfo>> {
         ViewMode::Listening => platform::get_listening_ports()?,
         ViewMode::Connections => platform::get_connections()?,
     };
-    ports = PortInfo::enrich_with_docker(ports);
     PortInfo::sort_vec(&mut ports, Some(state.sort));
     Ok(ports)
 }

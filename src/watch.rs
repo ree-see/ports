@@ -34,8 +34,6 @@ pub fn run(options: WatchOptions) -> Result<()> {
             platform::get_listening_ports()?
         };
         let ports = PortInfo::filter_protocol(ports, options.protocol);
-        // Enrich docker-proxy entries with container names
-        let ports = PortInfo::enrich_with_docker(ports);
         let mut filtered = filter_ports(ports, &options.filter, options.use_regex)?;
         PortInfo::sort_vec(&mut filtered, options.sort);
 
