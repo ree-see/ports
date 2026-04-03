@@ -57,10 +57,7 @@ pub fn detect_framework(info: &PortInfo) -> Option<String> {
         .as_ref()
         .and_then(|cwd| project::find_project_root(cwd));
     if let Some(ref root) = project_root {
-        if let Some(result) = detect_package_json(root) {
-            return Some(result);
-        }
-        if let Some(result) = detect_config_file(root) {
+        if let Some(result) = detect_from_project(root) {
             return Some(result);
         }
     }
@@ -87,14 +84,18 @@ const DOCKER_IMAGE_PATTERNS: &[(&str, &str)] = &[
 
 fn detect_docker_image(info: &PortInfo) -> Option<String> {
     info.container.as_ref()?;
-    let image = docker::get_container_image(info.port)?;
+    let image = match docker::get_container_image(info.port) {
+        Some(img) => img,
+        // Container present but no image in cache.
+        None => return Some("Docker".to_string()),
+    };
     let image_lower = image.to_lowercase();
     for &(substr, fw) in DOCKER_IMAGE_PATTERNS {
         if image_lower.contains(substr) {
             return Some(fw.to_string());
         }
     }
-    // Container present but unknown image.
+    // Container present but unknown image pattern.
     Some("Docker".to_string())
 }
 
@@ -103,12 +104,11 @@ fn detect_docker_image(info: &PortInfo) -> Option<String> {
 /// Patterns that are safe to match anywhere in the command.
 const UNAMBIGUOUS_CMD_PATTERNS: &[(&str, &str)] = &[
     ("flask", "Flask"),
-    ("uvicorn", "FastAPI"),
+    ("uvicorn", "Uvicorn"),
     ("manage.py", "Django"),
     ("django", "Django"),
     ("rails", "Rails"),
     ("gatsby", "Gatsby"),
-    ("remix", "Remix"),
     ("astro", "Astro"),
 ];
 
@@ -118,6 +118,7 @@ const AMBIGUOUS_CMD_PATTERNS: &[(&str, &str)] = &[
     ("next", "Next.js"),
     ("vite", "Vite"),
     ("nuxt", "Nuxt"),
+    ("remix", "Remix"),
     ("ng", "Angular"),
     ("angular", "Angular"),
     ("webpack", "Webpack"),
@@ -184,8 +185,10 @@ const PACKAGE_JSON_DEPS: &[(&str, &str)] = &[
     ("parcel", "Parcel"),
 ];
 
-fn detect_package_json(project_root: &Path) -> Option<String> {
-    // Check cache first.
+/// Cached lookup: tries package.json (Tier 2) then config
+/// files (Tier 3). Caches the combined result per project root
+/// so neither tier re-reads the filesystem on repeat calls.
+fn detect_from_project(project_root: &Path) -> Option<String> {
     {
         let cache = PROJECT_FRAMEWORK_CACHE.lock().unwrap();
         if let Some(cached) = cache.get(project_root) {
@@ -193,9 +196,9 @@ fn detect_package_json(project_root: &Path) -> Option<String> {
         }
     }
 
-    let result = read_package_json_framework(project_root);
+    let result =
+        read_package_json_framework(project_root).or_else(|| detect_config_file(project_root));
 
-    // Store in cache (including None to avoid re-reading).
     PROJECT_FRAMEWORK_CACHE
         .lock()
         .unwrap()
@@ -304,14 +307,17 @@ mod tests {
     }
 
     // ── Tier 0: Docker image ────────────────────────
+    //
+    // Consolidated into one test to avoid parallel-test
+    // race conditions on the shared global DOCKER_CACHE.
 
     #[test]
-    fn tier0_docker_image_postgres() {
-        // No container → should skip tier 0.
+    fn tier0_docker_image_detection() {
+        // Sub-case 1: no container → skip tier 0.
         let mut info = make_port_info();
         assert!(detect_docker_image(&info).is_none());
 
-        // Container present, populate cache with image.
+        // Sub-case 2: known image → matches pattern.
         info.container = Some("my-pg".into());
         let mut map = HashMap::new();
         map.insert(
@@ -323,17 +329,10 @@ mod tests {
                 ports: vec![(3000, 5432)],
             },
         );
-        // Inject into Docker cache for testing.
         *docker::DOCKER_CACHE.lock().unwrap() = Some((std::time::Instant::now(), map));
-
         assert_eq!(detect_docker_image(&info), Some("PostgreSQL".to_string()));
 
-        *docker::DOCKER_CACHE.lock().unwrap() = None;
-    }
-
-    #[test]
-    fn tier0_docker_image_unknown_returns_docker() {
-        let mut info = make_port_info();
+        // Sub-case 3: unknown image → returns "Docker".
         info.container = Some("custom-app".into());
         let mut map = HashMap::new();
         map.insert(
@@ -346,9 +345,14 @@ mod tests {
             },
         );
         *docker::DOCKER_CACHE.lock().unwrap() = Some((std::time::Instant::now(), map));
-
         assert_eq!(detect_docker_image(&info), Some("Docker".to_string()));
 
+        // Sub-case 4: container present, no cached image.
+        info.container = Some("mystery-app".into());
+        *docker::DOCKER_CACHE.lock().unwrap() = None;
+        assert_eq!(detect_docker_image(&info), Some("Docker".to_string()));
+
+        // Clean up.
         *docker::DOCKER_CACHE.lock().unwrap() = None;
     }
 
@@ -436,7 +440,7 @@ mod tests {
         let pkg = r#"{"dependencies":{"next":"14.0.0","react":"18.0.0"}}"#;
         fs::write(dir.path().join("package.json"), pkg).unwrap();
 
-        let result = detect_package_json(dir.path());
+        let result = detect_from_project(dir.path());
         assert_eq!(result, Some("Next.js".to_string()));
     }
 
@@ -448,7 +452,7 @@ mod tests {
         let pkg = r#"{"dependencies":{"react":"18","next":"14"}}"#;
         fs::write(dir.path().join("package.json"), pkg).unwrap();
 
-        assert_eq!(detect_package_json(dir.path()), Some("Next.js".to_string()));
+        assert_eq!(detect_from_project(dir.path()), Some("Next.js".to_string()));
     }
 
     #[test]
@@ -458,14 +462,14 @@ mod tests {
         let pkg = r#"{"devDependencies":{"vite":"5.0.0"}}"#;
         fs::write(dir.path().join("package.json"), pkg).unwrap();
 
-        assert_eq!(detect_package_json(dir.path()), Some("Vite".to_string()));
+        assert_eq!(detect_from_project(dir.path()), Some("Vite".to_string()));
     }
 
     #[test]
     fn tier2_package_json_missing() {
         clear_cache();
         let dir = TempDir::new().unwrap();
-        assert_eq!(detect_package_json(dir.path()), None);
+        assert_eq!(detect_from_project(dir.path()), None);
     }
 
     #[test]
@@ -473,7 +477,7 @@ mod tests {
         clear_cache();
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("package.json"), "{{bad json").unwrap();
-        assert_eq!(detect_package_json(dir.path()), None);
+        assert_eq!(detect_from_project(dir.path()), None);
     }
 
     // ── Tier 3: Config files ────────────────────────

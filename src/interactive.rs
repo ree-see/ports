@@ -23,11 +23,11 @@ pub fn select_and_kill(
                 p.port, p.protocol, p.pid, p.process_name
             );
             if let Some(ref fw) = p.framework {
-                base = format!("{} [{}]", base, fw);
+                base = format!("{} ({})", base, fw);
             }
             if let Some(map) = ancestry_map {
                 if let Some(a) = map.get(&p.pid) {
-                    return format!("{} ({})", base, a.source);
+                    return format!("{} [{}]", base, a.source);
                 }
             }
             base

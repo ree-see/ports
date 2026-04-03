@@ -7,14 +7,6 @@ use anyhow::Result;
 use crate::framework;
 use crate::types::PortInfo;
 
-fn enrich_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
-    PortInfo::enrich_with_docker(ports)
-}
-
-fn detect_frameworks(ports: Vec<PortInfo>) -> Vec<PortInfo> {
-    framework::resolve_frameworks(ports)
-}
-
 #[cfg(any(target_os = "linux", test))]
 pub mod linux;
 
@@ -53,8 +45,8 @@ pub fn get_listening_ports() -> Result<Vec<PortInfo>> {
     linux::get_listening_ports()
         .map(resolve_services)
         .map(enrich_process_details)
-        .map(enrich_docker)
-        .map(detect_frameworks)
+        .map(PortInfo::enrich_with_docker)
+        .map(framework::resolve_frameworks)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -62,8 +54,8 @@ pub fn get_listening_ports() -> Result<Vec<PortInfo>> {
     fallback::get_listening_ports()
         .map(resolve_services)
         .map(enrich_process_details)
-        .map(enrich_docker)
-        .map(detect_frameworks)
+        .map(PortInfo::enrich_with_docker)
+        .map(framework::resolve_frameworks)
 }
 
 #[cfg(target_os = "linux")]
@@ -71,8 +63,8 @@ pub fn get_connections() -> Result<Vec<PortInfo>> {
     linux::get_established_connections()
         .map(resolve_services)
         .map(enrich_process_details)
-        .map(enrich_docker)
-        .map(detect_frameworks)
+        .map(PortInfo::enrich_with_docker)
+        .map(framework::resolve_frameworks)
 }
 
 #[cfg(target_os = "macos")]
@@ -80,8 +72,8 @@ pub fn get_connections() -> Result<Vec<PortInfo>> {
     macos::get_connections()
         .map(resolve_services)
         .map(enrich_process_details)
-        .map(enrich_docker)
-        .map(detect_frameworks)
+        .map(PortInfo::enrich_with_docker)
+        .map(framework::resolve_frameworks)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
