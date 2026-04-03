@@ -37,6 +37,7 @@ The crate is structured as a library (`src/lib.rs`) consumed by a thin binary (`
 | `project` | `find_project_root()` utility: walks up from CWD looking for marker files (Cargo.toml, package.json, etc.) with caching |
 | `commands/` | One file per subcommand: `list`, `query`, `kill`, `history` |
 | `docker` | Uses `bollard` API to map host ports to container names; 3s TTL cache; only invoked when `docker-proxy` processes are detected |
+| `filter` | `--dev` flag support: `is_dev_process()` with 5-priority cascade (framework > container > dev-binary allowlist > platform blocklist > default true). Platform-conditional blocklists via `#[cfg]` |
 | `framework` | Framework/runtime detection with 5-tier cascade: Docker image > command patterns > package.json deps > config files > process name. Cached per project root |
 | `history` | SQLite via `rusqlite`: snapshots + ports tables; DB at `~/.local/share/ports/ports_history.db` |
 | `interactive` | `dialoguer`-based interactive kill picker |
