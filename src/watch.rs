@@ -7,8 +7,10 @@ use anyhow::Result;
 
 use crate::ancestry;
 use crate::cli::{ProtocolFilter, SortField};
+use crate::framework;
 use crate::output::{json, table};
 use crate::platform;
+use crate::project;
 use crate::types::PortInfo;
 
 pub struct WatchOptions {
@@ -27,6 +29,8 @@ pub fn run(options: WatchOptions) -> Result<()> {
 
     loop {
         clear_screen();
+        project::clear_cache();
+        framework::clear_cache();
 
         let ports = if options.connections {
             platform::get_connections()?
@@ -34,8 +38,6 @@ pub fn run(options: WatchOptions) -> Result<()> {
             platform::get_listening_ports()?
         };
         let ports = PortInfo::filter_protocol(ports, options.protocol);
-        // Enrich docker-proxy entries with container names
-        let ports = PortInfo::enrich_with_docker(ports);
         let mut filtered = filter_ports(ports, &options.filter, options.use_regex)?;
         PortInfo::sort_vec(&mut filtered, options.sort);
 

@@ -15,8 +15,6 @@ pub fn execute(target: &str, output_json: bool) -> Result<()> {
     if let Ok(conns) = platform::get_connections() {
         ports.extend(conns);
     }
-    let ports = PortInfo::enrich_with_docker(ports);
-
     // Auto-detect target type: try port number first, then PID, then name.
     let matches = if let Ok(port_num) = target.parse::<u16>() {
         let by_port: Vec<_> = ports

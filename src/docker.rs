@@ -14,6 +14,7 @@ use anyhow::Result;
 pub struct ContainerInfo {
     pub id: String,
     pub name: String,
+    pub image: Option<String>,
     pub ports: Vec<(u16, u16)>, // (host_port, container_port)
 }
 
@@ -27,7 +28,7 @@ impl ContainerInfo {
 type PortCache = Option<(Instant, HashMap<u16, ContainerInfo>)>;
 
 // Global cache: (last_refresh, port_mappings)
-static DOCKER_CACHE: LazyLock<Mutex<PortCache>> = LazyLock::new(|| Mutex::new(None));
+pub(crate) static DOCKER_CACHE: LazyLock<Mutex<PortCache>> = LazyLock::new(|| Mutex::new(None));
 
 const CACHE_TTL: Duration = Duration::from_secs(3);
 
@@ -50,6 +51,17 @@ pub fn get_port_mappings() -> HashMap<u16, ContainerInfo> {
 
     *cache = Some((Instant::now(), fresh.clone()));
     fresh
+}
+
+/// Look up the Docker image name for a container on a given port.
+///
+/// Reads from the cached port mappings (does not trigger a refresh).
+pub fn get_container_image(port: u16) -> Option<String> {
+    let cache = DOCKER_CACHE.lock().unwrap();
+    cache
+        .as_ref()
+        .and_then(|(_, data)| data.get(&port))
+        .and_then(|info| info.image.clone())
 }
 
 async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
@@ -81,6 +93,8 @@ async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
             .map(|n| n.trim_start_matches('/').to_string())
             .unwrap_or_default();
 
+        let image = container.image.clone();
+
         let mut port_pairs: Vec<(u16, u16)> = Vec::new();
 
         if let Some(ports) = container.ports {
@@ -98,6 +112,7 @@ async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
         let info = ContainerInfo {
             id,
             name,
+            image,
             ports: port_pairs.clone(),
         };
 
@@ -118,8 +133,31 @@ mod tests {
         let info = ContainerInfo {
             id: "abc123".to_string(),
             name: "my-container".to_string(),
+            image: Some("nginx:latest".to_string()),
             ports: vec![(3000, 80)],
         };
         assert_eq!(info.display_name(), "my-container");
+    }
+
+    #[test]
+    fn test_get_container_image_from_cache() {
+        // Populate the cache manually for testing.
+        let mut map = HashMap::new();
+        map.insert(
+            8080,
+            ContainerInfo {
+                id: "abc123".to_string(),
+                name: "web".to_string(),
+                image: Some("postgres:16".to_string()),
+                ports: vec![(8080, 5432)],
+            },
+        );
+        *DOCKER_CACHE.lock().unwrap() = Some((Instant::now(), map));
+
+        assert_eq!(get_container_image(8080), Some("postgres:16".to_string()));
+        assert_eq!(get_container_image(9999), None);
+
+        // Clean up.
+        *DOCKER_CACHE.lock().unwrap() = None;
     }
 }

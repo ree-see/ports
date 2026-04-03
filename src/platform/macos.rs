@@ -67,6 +67,7 @@ fn parse_lsof_line(line: &str) -> Option<PortInfo> {
         service_name: None,
         command_line: None,
         cwd: None,
+        framework: None,
     })
 }
 
@@ -367,6 +368,7 @@ node      12345 user   24u  IPv4 0x456      0t0  TCP *:3000 (LISTEN)";
             service_name: None,
             command_line: None,
             cwd: None,
+            framework: None,
         }];
         resolve_process_details(&mut ports);
         let has_detail = ports[0].command_line.is_some() || ports[0].cwd.is_some();

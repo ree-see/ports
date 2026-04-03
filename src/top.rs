@@ -16,8 +16,8 @@ use ratatui::Terminal;
 use crate::ancestry::{self, ProcessAncestry};
 use crate::cli::SortField;
 use crate::commands::kill::kill_process;
-use crate::platform;
 use crate::types::{PortInfo, Protocol};
+use crate::{framework, platform, project};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
@@ -232,11 +232,12 @@ fn run_loop(
 }
 
 fn fetch_ports(state: &TopState) -> Result<Vec<PortInfo>> {
+    project::clear_cache();
+    framework::clear_cache();
     let mut ports = match state.mode {
         ViewMode::Listening => platform::get_listening_ports()?,
         ViewMode::Connections => platform::get_connections()?,
     };
-    ports = PortInfo::enrich_with_docker(ports);
     PortInfo::sort_vec(&mut ports, Some(state.sort));
     Ok(ports)
 }
@@ -347,10 +348,15 @@ fn draw(
                 .map(|t| now.duration_since(*t) < new_threshold)
                 .unwrap_or(true);
 
-            let process_display = if let Some(ref container) = port.container {
-                format!("{} ({})", port.process_name, container)
-            } else {
-                port.process_name.clone()
+            let process_display = match (&port.container, &port.framework) {
+                (Some(c), Some(f)) => format!("{} ({}) [{}]", port.process_name, c, f),
+                (Some(c), None) => {
+                    format!("{} ({})", port.process_name, c)
+                }
+                (None, Some(f)) => {
+                    format!("{} [{}]", port.process_name, f)
+                }
+                (None, None) => port.process_name.clone(),
             };
 
             let cells: Vec<Cell> = if is_connections {

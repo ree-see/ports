@@ -9,7 +9,6 @@ use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, Connection};
 
 use crate::platform;
-use crate::types::PortInfo;
 
 const DB_NAME: &str = "ports_history.db";
 
@@ -82,8 +81,6 @@ pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
     if include_connections {
         all_ports.extend(platform::get_connections()?);
     }
-    let all_ports = PortInfo::enrich_with_docker(all_ports);
-
     // Insert snapshot
     conn.execute(
         "INSERT INTO snapshots (timestamp, unix_ts) VALUES (?1, ?2)",

@@ -22,8 +22,6 @@ pub fn execute(
     };
 
     let ports = PortInfo::filter_protocol(ports, protocol);
-    // Enrich docker-proxy entries with container names
-    let ports = PortInfo::enrich_with_docker(ports);
 
     let mut filtered = PortInfo::filter_by_query(ports, query, use_regex)?;
 
