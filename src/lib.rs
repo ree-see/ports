@@ -27,6 +27,7 @@ pub mod history;
 pub mod interactive;
 pub mod output;
 pub mod platform;
+pub mod project;
 pub mod top;
 pub mod types;
 pub mod watch;

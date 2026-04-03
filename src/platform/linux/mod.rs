@@ -1,5 +1,6 @@
 pub mod proc_fd;
 pub mod proc_parser;
+pub mod process;
 
 use std::fs;
 use std::net::IpAddr;
@@ -93,6 +94,8 @@ fn get_ports(mode: FilterMode) -> Result<Vec<PortInfo>> {
                         remote_address: remote,
                         container: None,
                         service_name: None,
+                        command_line: None,
+                        cwd: None,
                     });
                 }
             }

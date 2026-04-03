@@ -1,6 +1,8 @@
 //! Core data types for port information.
 
 use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use regex::Regex;
@@ -9,7 +11,7 @@ use serde::Serialize;
 use crate::cli::{ProtocolFilter, SortField};
 use crate::docker;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PortInfo {
     pub port: u16,
     pub protocol: Protocol,
@@ -24,6 +26,42 @@ pub struct PortInfo {
     /// Well-known service name for this port (e.g. "http", "ssh").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_name: Option<String>,
+    /// Full command line of the process.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_line: Option<String>,
+    /// Working directory of the process.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+}
+
+// Manual Hash/Eq excludes command_line and cwd so that watch
+// mode does not flag a CWD change as a "new" port.
+impl PartialEq for PortInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.port == other.port
+            && self.protocol == other.protocol
+            && self.pid == other.pid
+            && self.process_name == other.process_name
+            && self.address == other.address
+            && self.remote_address == other.remote_address
+            && self.container == other.container
+            && self.service_name == other.service_name
+    }
+}
+
+impl Eq for PortInfo {}
+
+impl Hash for PortInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.port.hash(state);
+        self.protocol.hash(state);
+        self.pid.hash(state);
+        self.process_name.hash(state);
+        self.address.hash(state);
+        self.remote_address.hash(state);
+        self.container.hash(state);
+        self.service_name.hash(state);
+    }
 }
 
 static WELL_KNOWN_PORTS: &[(u16, &str)] = &[
@@ -179,5 +217,52 @@ impl fmt::Display for Protocol {
             Protocol::Tcp => write!(f, "tcp"),
             Protocol::Udp => write!(f, "udp"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn make_port_info() -> PortInfo {
+        PortInfo {
+            port: 8080,
+            protocol: Protocol::Tcp,
+            pid: 1234,
+            process_name: "node".to_string(),
+            address: "127.0.0.1:8080".to_string(),
+            remote_address: None,
+            container: None,
+            service_name: None,
+            command_line: None,
+            cwd: None,
+        }
+    }
+
+    #[test]
+    fn eq_ignores_command_line_and_cwd() {
+        let a = make_port_info();
+        let mut b = make_port_info();
+        b.command_line = Some("/usr/bin/node server.js".into());
+        b.cwd = Some(PathBuf::from("/home/user/project"));
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn hash_ignores_command_line_and_cwd() {
+        let a = make_port_info();
+        let mut b = make_port_info();
+        b.command_line = Some("/usr/bin/node server.js".into());
+        b.cwd = Some(PathBuf::from("/home/user/project"));
+
+        let mut set = HashSet::new();
+        set.insert(a);
+        assert!(
+            set.contains(&b),
+            "HashSet should treat entries differing only \
+             in command_line/cwd as identical"
+        );
     }
 }
