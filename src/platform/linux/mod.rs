@@ -1,5 +1,6 @@
 pub mod proc_fd;
 pub mod proc_parser;
+pub mod process;
 
 use std::fs;
 use std::net::IpAddr;
