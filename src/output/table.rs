@@ -23,6 +23,7 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
     let has_remote = ports.iter().any(|p| p.remote_address.is_some());
     let has_container = ports.iter().any(|p| p.container.is_some());
     let has_service = ports.iter().any(|p| p.service_name.is_some());
+    let has_framework = ports.iter().any(|p| p.framework.is_some());
 
     let mut table = Table::new();
 
@@ -30,6 +31,9 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
     let mut headers = vec!["PORT", "PROTO", "PID", "PROCESS"];
     if has_service {
         headers.push("SERVICE");
+    }
+    if has_framework {
+        headers.push("FRAMEWORK");
     }
     if has_container {
         headers.push("CONTAINER");
@@ -64,6 +68,16 @@ fn print_ports_inner(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
         if has_service {
             let service = port.service_name.as_deref().unwrap_or("-");
             row.push(Cell::new(service).fg(row_color));
+        }
+
+        if has_framework {
+            let fw = port.framework.as_deref().unwrap_or("-");
+            let fw_color = if port.framework.is_some() && !is_new {
+                Color::Magenta
+            } else {
+                row_color
+            };
+            row.push(Cell::new(fw).fg(fw_color));
         }
 
         if has_container {
@@ -111,12 +125,16 @@ pub fn print_ports_why(ports: &[PortInfo], ancestry_map: &HashMap<u32, ProcessAn
     let has_remote = ports.iter().any(|p| p.remote_address.is_some());
     let has_container = ports.iter().any(|p| p.container.is_some());
     let has_service = ports.iter().any(|p| p.service_name.is_some());
+    let has_framework = ports.iter().any(|p| p.framework.is_some());
 
     let mut table = Table::new();
 
     let mut headers = vec!["PORT", "PROTO", "PID", "PROCESS", "SOURCE"];
     if has_service {
         headers.push("SERVICE");
+    }
+    if has_framework {
+        headers.push("FRAMEWORK");
     }
     if has_container {
         headers.push("CONTAINER");
@@ -151,6 +169,16 @@ pub fn print_ports_why(ports: &[PortInfo], ancestry_map: &HashMap<u32, ProcessAn
         if has_service {
             let service = port.service_name.as_deref().unwrap_or("-");
             row.push(Cell::new(service));
+        }
+
+        if has_framework {
+            let fw = port.framework.as_deref().unwrap_or("-");
+            let fw_color = if port.framework.is_some() {
+                Color::Magenta
+            } else {
+                Color::Reset
+            };
+            row.push(Cell::new(fw).fg(fw_color));
         }
 
         if has_container {

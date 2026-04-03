@@ -346,10 +346,15 @@ fn draw(
                 .map(|t| now.duration_since(*t) < new_threshold)
                 .unwrap_or(true);
 
-            let process_display = if let Some(ref container) = port.container {
-                format!("{} ({})", port.process_name, container)
-            } else {
-                port.process_name.clone()
+            let process_display = match (&port.container, &port.framework) {
+                (Some(c), Some(f)) => format!("{} ({}) [{}]", port.process_name, c, f),
+                (Some(c), None) => {
+                    format!("{} ({})", port.process_name, c)
+                }
+                (None, Some(f)) => {
+                    format!("{} [{}]", port.process_name, f)
+                }
+                (None, None) => port.process_name.clone(),
             };
 
             let cells: Vec<Cell> = if is_connections {

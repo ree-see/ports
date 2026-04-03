@@ -18,13 +18,16 @@ pub fn select_and_kill(
     let items: Vec<String> = ports
         .iter()
         .map(|p| {
-            let base = format!(
+            let mut base = format!(
                 "{:>5} {:4} {:>6} {}",
                 p.port, p.protocol, p.pid, p.process_name
             );
+            if let Some(ref fw) = p.framework {
+                base = format!("{} [{}]", base, fw);
+            }
             if let Some(map) = ancestry_map {
                 if let Some(a) = map.get(&p.pid) {
-                    return format!("{} [{}]", base, a.source);
+                    return format!("{} ({})", base, a.source);
                 }
             }
             base

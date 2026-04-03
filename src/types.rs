@@ -130,6 +130,10 @@ impl PortInfo {
                             .as_ref()
                             .map(|c| re.is_match(c))
                             .unwrap_or(false)
+                        || p.framework
+                            .as_ref()
+                            .map(|f| re.is_match(f))
+                            .unwrap_or(false)
                 })
                 .collect());
         }
@@ -145,6 +149,10 @@ impl PortInfo {
                         || p.container
                             .as_ref()
                             .map(|c| c.to_lowercase().contains(&query_lower))
+                            .unwrap_or(false)
+                        || p.framework
+                            .as_ref()
+                            .map(|f| f.to_lowercase().contains(&query_lower))
                             .unwrap_or(false)
                 })
                 .collect())
