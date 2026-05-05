@@ -85,16 +85,14 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     match &cli.command {
-        Some(cli::Commands::List) => {
-            commands::list::execute(
-                cli.json,
-                cli.connections,
-                cli.sort,
-                cli.protocol,
-                cli.why,
-                cli.dev,
-            )
-        }
+        Some(cli::Commands::List) => commands::list::execute(
+            cli.json,
+            cli.connections,
+            cli.sort,
+            cli.protocol,
+            cli.why,
+            cli.dev,
+        ),
         Some(cli::Commands::Kill {
             target,
             force,
@@ -102,11 +100,15 @@ pub fn run(cli: Cli) -> Result<()> {
             connections,
         }) => commands::kill::execute(target, *force, *all, *connections),
         Some(cli::Commands::Why { target }) => commands::why::execute(target, cli.json),
-        Some(cli::Commands::Top { connections }) => {
-            top::run(*connections, cli.dev)
-        }
+        Some(cli::Commands::Top { connections }) => top::run(*connections, cli.dev),
         Some(cli::Commands::Completions { shell }) => {
-            generate(*shell, &mut Cli::command(), "ports", &mut io::stdout());
+            use clap_complete::Shell;
+            let mut cmd = Cli::command();
+            if matches!(shell, Shell::Fish) {
+                print!("{}", build_fish_completions(&mut cmd));
+            } else {
+                generate(*shell, &mut cmd, "ports", &mut io::stdout());
+            }
             Ok(())
         }
         Some(cli::Commands::History { action }) => match action {
@@ -137,16 +139,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 cli.why,
                 cli.dev,
             ),
-            None => {
-                commands::list::execute(
-                    cli.json,
-                    cli.connections,
-                    cli.sort,
-                    cli.protocol,
-                    cli.why,
-                    cli.dev,
-                )
-            }
+            None => commands::list::execute(
+                cli.json,
+                cli.connections,
+                cli.sort,
+                cli.protocol,
+                cli.why,
+                cli.dev,
+            ),
         },
     }
 }
@@ -180,4 +180,33 @@ fn run_interactive(cli: &Cli) -> Result<()> {
     };
 
     interactive::select_and_kill(&ports, ancestry_map.as_ref())
+}
+
+fn build_fish_completions(cmd: &mut clap::Command) -> String {
+    use clap_complete::Shell;
+    let mut buf = Vec::new();
+    generate(Shell::Fish, cmd, "ports", &mut buf);
+    let body = String::from_utf8(buf).expect("clap_complete fish output is valid UTF-8");
+    format!("complete -c ports -f\n{body}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fish_completions_suppress_files() {
+        let mut cmd = Cli::command();
+        let out = build_fish_completions(&mut cmd);
+        assert!(
+            out.starts_with("complete -c ports -f\n"),
+            "fish completion must prepend `complete -c ports -f` so fish \
+             doesn't fall back to file completion at the top level"
+        );
+        let body = out.trim_start_matches("complete -c ports -f\n");
+        assert!(
+            body.contains("kill"),
+            "subcommand candidates must still appear after the prefix"
+        );
+    }
 }
