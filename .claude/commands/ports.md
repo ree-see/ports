@@ -189,9 +189,14 @@ ports history diff --ago 5         # Diff against 5 snapshots ago
 ## Shell Completions
 
 ```bash
-ports completions bash > /usr/local/share/bash-completion/completions/ports
-ports completions zsh > /usr/local/share/zsh/site-functions/_ports
-ports completions fish > ~/.config/fish/completions/ports.fish
+# Install (writes to the shell's standard completions dir)
+ports completions fish     # ~/.config/fish/completions/ports.fish
+ports completions bash     # ~/.local/share/bash-completion/completions/ports
+ports completions zsh      # ~/.zsh/completions/_ports
+
+# Print to stdout (piping / custom paths)
+ports completions fish --print | source
+ports completions fish --print > ~/some/custom.fish
 ```
 
 ## Docker Awareness

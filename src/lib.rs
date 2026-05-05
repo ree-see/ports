@@ -36,12 +36,15 @@ pub mod watch;
 
 pub use cli::Cli;
 
+use std::env;
+use std::fs;
 use std::io;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::CommandFactory;
-use clap_complete::generate;
+use clap_complete::{generate, Shell};
 
 use types::PortInfo;
 
@@ -101,13 +104,20 @@ pub fn run(cli: Cli) -> Result<()> {
         }) => commands::kill::execute(target, *force, *all, *connections),
         Some(cli::Commands::Why { target }) => commands::why::execute(target, cli.json),
         Some(cli::Commands::Top { connections }) => top::run(*connections, cli.dev),
-        Some(cli::Commands::Completions { shell }) => {
-            use clap_complete::Shell;
-            let mut cmd = Cli::command();
-            if matches!(shell, Shell::Fish) {
-                print!("{}", build_fish_completions(&mut cmd));
+        Some(cli::Commands::Completions { shell, print }) => {
+            if *print {
+                let mut cmd = Cli::command();
+                if matches!(shell, Shell::Fish) {
+                    print!("{}", build_fish_completions(&mut cmd));
+                } else {
+                    generate(*shell, &mut cmd, "ports", &mut io::stdout());
+                }
             } else {
-                generate(*shell, &mut cmd, "ports", &mut io::stdout());
+                let installed = install_completions(*shell)?;
+                eprintln!("Installed completions to {}", installed.path.display());
+                if !installed.hint.is_empty() {
+                    eprintln!("{}", installed.hint);
+                }
             }
             Ok(())
         }
@@ -183,16 +193,104 @@ fn run_interactive(cli: &Cli) -> Result<()> {
 }
 
 fn build_fish_completions(cmd: &mut clap::Command) -> String {
-    use clap_complete::Shell;
     let mut buf = Vec::new();
     generate(Shell::Fish, cmd, "ports", &mut buf);
     let body = String::from_utf8(buf).expect("clap_complete fish output is valid UTF-8");
     format!("complete -c ports -f\n{body}")
 }
 
+struct Installed {
+    path: PathBuf,
+    hint: String,
+}
+
+fn install_path_under(
+    shell: Shell,
+    home: &Path,
+    xdg_config: Option<&Path>,
+    xdg_data: Option<&Path>,
+) -> Option<PathBuf> {
+    match shell {
+        Shell::Fish => {
+            let base = xdg_config
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| home.join(".config"));
+            Some(base.join("fish/completions/ports.fish"))
+        }
+        Shell::Bash => {
+            let base = xdg_data
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| home.join(".local/share"));
+            Some(base.join("bash-completion/completions/ports"))
+        }
+        Shell::Zsh => Some(home.join(".zsh/completions/_ports")),
+        _ => None,
+    }
+}
+
+fn install_path(shell: Shell) -> Result<PathBuf> {
+    let home = dirs::home_dir().context("HOME is not set")?;
+    let xdg_config = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute());
+    let xdg_data = env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute());
+    install_path_under(shell, &home, xdg_config.as_deref(), xdg_data.as_deref()).with_context(
+        || {
+            format!(
+                "auto-install of completions is not supported for {shell}. \
+                 Use `ports completions {shell} --print` and redirect manually."
+            )
+        },
+    )
+}
+
+fn install_completions(shell: Shell) -> Result<Installed> {
+    let path = install_path(shell)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let mut cmd = Cli::command();
+    let body = if matches!(shell, Shell::Fish) {
+        build_fish_completions(&mut cmd)
+    } else {
+        let mut buf = Vec::new();
+        generate(shell, &mut cmd, "ports", &mut buf);
+        String::from_utf8(buf).expect("clap_complete output is valid UTF-8")
+    };
+    fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+    let hint = post_install_hint(shell, &path);
+    Ok(Installed { path, hint })
+}
+
+fn post_install_hint(shell: Shell, path: &Path) -> String {
+    let parent = path.parent().unwrap_or(path);
+    match shell {
+        Shell::Fish => format!("Restart your shell, or run: source {}", path.display()),
+        Shell::Bash => format!(
+            "Restart your shell to enable.\n\
+             If `ports <TAB>` does not work, ensure bash-completion is installed \
+             and that {} is on its lookup path. On macOS with Homebrew, you may \
+             need to symlink to $(brew --prefix)/etc/bash_completion.d/ports.",
+            parent.display()
+        ),
+        Shell::Zsh => format!(
+            "If {} is not in your fpath, add to ~/.zshrc:\n\
+             \x20 fpath=({} $fpath)\n\
+             \x20 autoload -Uz compinit && compinit",
+            parent.display(),
+            parent.display(),
+        ),
+        _ => String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap_complete::Shell;
+    use std::path::Path;
 
     #[test]
     fn fish_completions_suppress_files() {
@@ -208,5 +306,80 @@ mod tests {
             body.contains("kill"),
             "subcommand candidates must still appear after the prefix"
         );
+    }
+
+    #[test]
+    fn install_path_under_fish_uses_dot_config() {
+        let home = Path::new("/home/test");
+        let path = install_path_under(Shell::Fish, home, None, None).unwrap();
+        assert_eq!(
+            path,
+            Path::new("/home/test/.config/fish/completions/ports.fish")
+        );
+    }
+
+    #[test]
+    fn install_path_under_fish_respects_xdg_config_home() {
+        let home = Path::new("/home/test");
+        let xdg = Path::new("/custom/xdg");
+        let path = install_path_under(Shell::Fish, home, Some(xdg), None).unwrap();
+        assert_eq!(path, Path::new("/custom/xdg/fish/completions/ports.fish"));
+    }
+
+    #[test]
+    fn install_path_under_fish_ignores_relative_xdg_config_home() {
+        // install_path() filters non-absolute XDG values to None before
+        // calling install_path_under; verify the under-fn falls back to
+        // the home-relative default when xdg_config is None.
+        let home = Path::new("/home/test");
+        let path = install_path_under(Shell::Fish, home, None, None).unwrap();
+        assert_eq!(
+            path,
+            Path::new("/home/test/.config/fish/completions/ports.fish")
+        );
+    }
+
+    #[test]
+    fn install_path_under_fish_ignores_empty_xdg_config_home() {
+        let home = Path::new("/home/test");
+        let path = install_path_under(Shell::Fish, home, None, None).unwrap();
+        assert_eq!(
+            path,
+            Path::new("/home/test/.config/fish/completions/ports.fish")
+        );
+    }
+
+    #[test]
+    fn install_path_under_bash_uses_local_share() {
+        let home = Path::new("/home/test");
+        let path = install_path_under(Shell::Bash, home, None, None).unwrap();
+        assert_eq!(
+            path,
+            Path::new("/home/test/.local/share/bash-completion/completions/ports")
+        );
+    }
+
+    #[test]
+    fn install_path_under_bash_respects_xdg_data_home() {
+        let home = Path::new("/home/test");
+        let xdg = Path::new("/custom/data");
+        let path = install_path_under(Shell::Bash, home, None, Some(xdg)).unwrap();
+        assert_eq!(
+            path,
+            Path::new("/custom/data/bash-completion/completions/ports")
+        );
+    }
+
+    #[test]
+    fn install_path_under_zsh_uses_dot_zsh() {
+        let home = Path::new("/home/test");
+        let path = install_path_under(Shell::Zsh, home, None, None).unwrap();
+        assert_eq!(path, Path::new("/home/test/.zsh/completions/_ports"));
+    }
+
+    #[test]
+    fn install_path_under_powershell_returns_none() {
+        let home = Path::new("/home/test");
+        assert!(install_path_under(Shell::PowerShell, home, None, None).is_none());
     }
 }

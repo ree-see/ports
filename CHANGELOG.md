@@ -7,12 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: `ports completions <shell>` now installs the completion file
+  to the shell's standard user directory by default, instead of printing to
+  stdout. Per-shell paths: fish to `~/.config/fish/completions/ports.fish`,
+  bash to `~/.local/share/bash-completion/completions/ports`, zsh to
+  `~/.zsh/completions/_ports`. PowerShell and Elvish auto-install are not
+  supported — use `--print` and redirect manually. Migration: if you had
+  `ports completions fish > file` in your dotfiles, change it to
+  `ports completions fish --print > file`.
+
 ### Fixed
 
 - Fish shell completions no longer mix listening-port subcommands with files and
   directories from the current working directory. Users with an existing
   `~/.config/fish/completions/ports.fish` should regenerate it after upgrading:
-  `ports completions fish > ~/.config/fish/completions/ports.fish`.
+  `ports completions fish` (now installs in place).
 
 ## [0.2.1] - 2026-02-22
 

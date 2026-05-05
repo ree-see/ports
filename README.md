@@ -241,16 +241,20 @@ ports -c --json
 ## Shell Completions
 
 ```bash
-# Generate and save
-ports completions bash > /usr/local/share/bash-completion/completions/ports
-ports completions zsh > /usr/local/share/zsh/site-functions/_ports
-ports completions fish > ~/.config/fish/completions/ports.fish
+# Install (writes to your shell's standard completions dir)
+ports completions fish     # ~/.config/fish/completions/ports.fish
+ports completions bash     # ~/.local/share/bash-completion/completions/ports
+ports completions zsh      # ~/.zsh/completions/_ports
 
-# Or eval dynamically in shell config
-eval "$(ports completions bash)"  # ~/.bashrc
-eval "$(ports completions zsh)"   # ~/.zshrc
-ports completions fish | source   # ~/.config/fish/config.fish
+# Or print to stdout (for piping or custom paths)
+ports completions fish --print | source              # load into current shell
+ports completions fish --print > ~/some/custom.fish  # custom path
+eval "$(ports completions bash --print)"             # ~/.bashrc
+eval "$(ports completions zsh --print)"              # ~/.zshrc
 ```
+
+Regenerating overwrites the file. If you've hand-edited it, save your edits
+elsewhere and use `--print` to write to a custom path.
 
 ## Claude Code Integration
 

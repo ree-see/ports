@@ -94,6 +94,10 @@ pub enum Commands {
         /// Shell to generate completions for
         #[arg(value_enum)]
         shell: Shell,
+
+        /// Print to stdout instead of installing to the shell's user dir
+        #[arg(long)]
+        print: bool,
     },
     /// Show why a process is running (ancestry, source, supervisor)
     Why {
