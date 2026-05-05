@@ -87,16 +87,19 @@ fn installs_fish_completions_to_xdg_config() {
 fn regenerate_overwrites_existing_completions() {
     let temp = TempDir::new().expect("tempdir");
     let installed = temp.path().join(".config/fish/completions/ports.fish");
+    std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    std::fs::write(&installed, "SENTINEL_FROM_HAND_EDIT").unwrap();
 
-    for _ in 0..2 {
-        let output = ports_completions_cmd(&temp, &["completions", "fish"])
-            .output()
-            .expect("run completions fish");
-        assert!(output.status.success());
-    }
+    let output = ports_completions_cmd(&temp, &["completions", "fish"])
+        .output()
+        .expect("run completions fish");
+    assert!(output.status.success());
 
-    assert!(installed.exists());
     let body = std::fs::read_to_string(&installed).unwrap();
+    assert!(
+        !body.contains("SENTINEL_FROM_HAND_EDIT"),
+        "regenerate must overwrite existing file content"
+    );
     assert!(body.starts_with("complete -c ports -f\n"));
 }
 

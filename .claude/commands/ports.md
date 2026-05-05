@@ -189,15 +189,22 @@ ports history diff --ago 5         # Diff against 5 snapshots ago
 ## Shell Completions
 
 ```bash
-# Install (writes to the shell's standard completions dir)
+# Install (writes to your shell's standard completions dir)
 ports completions fish     # ~/.config/fish/completions/ports.fish
 ports completions bash     # ~/.local/share/bash-completion/completions/ports
 ports completions zsh      # ~/.zsh/completions/_ports
 
-# Print to stdout (piping / custom paths)
-ports completions fish --print | source
-ports completions fish --print > ~/some/custom.fish
+# Or print to stdout (for piping or custom paths)
+ports completions fish --print | source              # load into current shell
+ports completions fish --print > ~/some/custom.fish  # custom path
+
+# Bash/zsh users who prefer to eval inline can add to ~/.bashrc / ~/.zshrc:
+eval "$(ports completions bash --print)"
+eval "$(ports completions zsh --print)"
 ```
+
+Regenerating overwrites the file. If you've hand-edited it, save your edits
+elsewhere and use `--print` to write to a custom path.
 
 ## Docker Awareness
 

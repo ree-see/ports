@@ -249,8 +249,10 @@ ports completions zsh      # ~/.zsh/completions/_ports
 # Or print to stdout (for piping or custom paths)
 ports completions fish --print | source              # load into current shell
 ports completions fish --print > ~/some/custom.fish  # custom path
-eval "$(ports completions bash --print)"             # ~/.bashrc
-eval "$(ports completions zsh --print)"              # ~/.zshrc
+
+# Bash/zsh users who prefer to eval inline can add to ~/.bashrc / ~/.zshrc:
+eval "$(ports completions bash --print)"
+eval "$(ports completions zsh --print)"
 ```
 
 Regenerating overwrites the file. If you've hand-edited it, save your edits
