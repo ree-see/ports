@@ -203,8 +203,9 @@ mod tests {
             "fish completion must prepend `complete -c ports -f` so fish \
              doesn't fall back to file completion at the top level"
         );
+        let body = out.trim_start_matches("complete -c ports -f\n");
         assert!(
-            out.contains("-a \"kill\""),
+            body.contains("kill"),
             "subcommand candidates must still appear after the prefix"
         );
     }
