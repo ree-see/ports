@@ -4,9 +4,15 @@
 //! a tiered detection cascade:
 //!   0. Docker image name
 //!   1. Command-line string patterns
-//!   2. package.json dependency lookup
-//!   3. Config file existence
-//!   4. Process name fallback
+//!   2. package.json dependency lookup (project-confirmed)
+//!   3. Process name (known runtime: node, python, bun, ...)
+//!   4. Config file existence (last resort)
+//!
+//! Tier 3 sits above Tier 4 because a `node` process running from a
+//! directory whose ancestor contains `Cargo.toml` is still Node.js,
+//! not Rust. Config-file detection is only meaningful when the
+//! process name itself doesn't identify the runtime (e.g. a compiled
+//! Rust binary serving from its own project root).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +24,18 @@ use crate::types::PortInfo;
 
 // ── Caches ──────────────────────────────────────────────
 
-type FrameworkCache = HashMap<PathBuf, Option<String>>;
+/// Per-project-root scan result. Tier 2 and Tier 4 are split so the
+/// caller can interleave process-name (Tier 3) detection between
+/// them without re-reading the filesystem.
+#[derive(Clone, Default)]
+struct ProjectFramework {
+    /// Tier 2: framework from package.json dependencies.
+    from_package: Option<String>,
+    /// Tier 4: framework from config-file presence.
+    from_config: Option<String>,
+}
+
+type FrameworkCache = HashMap<PathBuf, ProjectFramework>;
 
 static PROJECT_FRAMEWORK_CACHE: LazyLock<Mutex<FrameworkCache>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -52,16 +69,20 @@ pub fn detect_framework(info: &PortInfo) -> Option<String> {
     if let Some(result) = detect_command_pattern(info) {
         return Some(result);
     }
-    let project_root = info
+    let project = info
         .cwd
         .as_ref()
-        .and_then(|cwd| project::find_project_root(cwd));
-    if let Some(ref root) = project_root {
-        if let Some(result) = detect_from_project(root) {
-            return Some(result);
+        .and_then(|cwd| project::find_project_root(cwd))
+        .map(|root| project_framework(&root));
+    if let Some(pf) = &project {
+        if let Some(result) = &pf.from_package {
+            return Some(result.clone());
         }
     }
-    detect_process_name(info)
+    if let Some(result) = detect_process_name(info) {
+        return Some(result);
+    }
+    project.and_then(|pf| pf.from_config)
 }
 
 // ── Tier 0: Docker image ────────────────────────────────
@@ -185,10 +206,10 @@ const PACKAGE_JSON_DEPS: &[(&str, &str)] = &[
     ("parcel", "Parcel"),
 ];
 
-/// Cached lookup: tries package.json (Tier 2) then config
-/// files (Tier 3). Caches the combined result per project root
-/// so neither tier re-reads the filesystem on repeat calls.
-fn detect_from_project(project_root: &Path) -> Option<String> {
+/// Cached per-root scan: reads `package.json` (Tier 2) and checks
+/// for known config files (Tier 4) in one pass, returning both so
+/// the caller can interleave Tier 3 (process name) between them.
+fn project_framework(project_root: &Path) -> ProjectFramework {
     {
         let cache = PROJECT_FRAMEWORK_CACHE.lock().unwrap();
         if let Some(cached) = cache.get(project_root) {
@@ -196,8 +217,10 @@ fn detect_from_project(project_root: &Path) -> Option<String> {
         }
     }
 
-    let result =
-        read_package_json_framework(project_root).or_else(|| detect_config_file(project_root));
+    let result = ProjectFramework {
+        from_package: read_package_json_framework(project_root),
+        from_config: detect_config_file(project_root),
+    };
 
     PROJECT_FRAMEWORK_CACHE
         .lock()
@@ -226,7 +249,7 @@ fn read_package_json_framework(project_root: &Path) -> Option<String> {
     None
 }
 
-// ── Tier 3: Config file detection ───────────────────────
+// ── Tier 4: Config file detection ───────────────────────
 
 const CONFIG_FILE_PATTERNS: &[(&[&str], &str)] = &[
     (
@@ -260,10 +283,12 @@ fn detect_config_file(project_root: &Path) -> Option<String> {
     None
 }
 
-// ── Tier 4: Process name fallback ───────────────────────
+// ── Tier 3: Process name ────────────────────────────────
 
 const PROCESS_NAME_MAP: &[(&str, &str)] = &[
     ("node", "Node.js"),
+    ("bun", "Bun"),
+    ("deno", "Deno"),
     ("python", "Python"),
     ("python3", "Python"),
     ("ruby", "Ruby"),
@@ -440,8 +465,8 @@ mod tests {
         let pkg = r#"{"dependencies":{"next":"14.0.0","react":"18.0.0"}}"#;
         fs::write(dir.path().join("package.json"), pkg).unwrap();
 
-        let result = detect_from_project(dir.path());
-        assert_eq!(result, Some("Next.js".to_string()));
+        let pf = project_framework(dir.path());
+        assert_eq!(pf.from_package, Some("Next.js".to_string()));
     }
 
     #[test]
@@ -452,7 +477,10 @@ mod tests {
         let pkg = r#"{"dependencies":{"react":"18","next":"14"}}"#;
         fs::write(dir.path().join("package.json"), pkg).unwrap();
 
-        assert_eq!(detect_from_project(dir.path()), Some("Next.js".to_string()));
+        assert_eq!(
+            project_framework(dir.path()).from_package,
+            Some("Next.js".to_string())
+        );
     }
 
     #[test]
@@ -462,14 +490,17 @@ mod tests {
         let pkg = r#"{"devDependencies":{"vite":"5.0.0"}}"#;
         fs::write(dir.path().join("package.json"), pkg).unwrap();
 
-        assert_eq!(detect_from_project(dir.path()), Some("Vite".to_string()));
+        assert_eq!(
+            project_framework(dir.path()).from_package,
+            Some("Vite".to_string())
+        );
     }
 
     #[test]
     fn tier2_package_json_missing() {
         clear_cache();
         let dir = TempDir::new().unwrap();
-        assert_eq!(detect_from_project(dir.path()), None);
+        assert_eq!(project_framework(dir.path()).from_package, None);
     }
 
     #[test]
@@ -477,51 +508,51 @@ mod tests {
         clear_cache();
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("package.json"), "{{bad json").unwrap();
-        assert_eq!(detect_from_project(dir.path()), None);
+        assert_eq!(project_framework(dir.path()).from_package, None);
     }
 
-    // ── Tier 3: Config files ────────────────────────
+    // ── Tier 3: Process name ────────────────────────
 
     #[test]
-    fn tier3_vite_config() {
-        let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("vite.config.ts"), "").unwrap();
-        assert_eq!(detect_config_file(dir.path()), Some("Vite".to_string()));
-    }
-
-    #[test]
-    fn tier3_cargo_toml() {
-        let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "").unwrap();
-        assert_eq!(detect_config_file(dir.path()), Some("Rust".to_string()));
-    }
-
-    #[test]
-    fn tier3_no_config() {
-        let dir = TempDir::new().unwrap();
-        assert_eq!(detect_config_file(dir.path()), None);
-    }
-
-    // ── Tier 4: Process name ────────────────────────
-
-    #[test]
-    fn tier4_node() {
+    fn tier3_node() {
         let info = make_port_info(); // process_name = "node"
         assert_eq!(detect_process_name(&info), Some("Node.js".to_string()));
     }
 
     #[test]
-    fn tier4_python3() {
+    fn tier3_python3() {
         let mut info = make_port_info();
         info.process_name = "python3".into();
         assert_eq!(detect_process_name(&info), Some("Python".to_string()));
     }
 
     #[test]
-    fn tier4_unknown() {
+    fn tier3_unknown() {
         let mut info = make_port_info();
         info.process_name = "myapp".into();
         assert_eq!(detect_process_name(&info), None);
+    }
+
+    // ── Tier 4: Config files ────────────────────────
+
+    #[test]
+    fn tier4_vite_config() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+        assert_eq!(detect_config_file(dir.path()), Some("Vite".to_string()));
+    }
+
+    #[test]
+    fn tier4_cargo_toml() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        assert_eq!(detect_config_file(dir.path()), Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn tier4_no_config() {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(detect_config_file(dir.path()), None);
     }
 
     // ── Priority / integration ──────────────────────
@@ -531,7 +562,7 @@ mod tests {
         let mut info = make_port_info();
         info.process_name = "node".into();
         info.command_line = Some("node manage.py runserver".into());
-        // Tier 1 (Django via manage.py) should win over Tier 4 (Node.js).
+        // Tier 1 (Django via manage.py) should win over Tier 3 (Node.js).
         assert_eq!(detect_framework(&info), Some("Django".to_string()));
     }
 
@@ -545,7 +576,7 @@ mod tests {
         let mut info = make_port_info();
         info.process_name = "node".into();
         info.cwd = Some(dir.path().to_path_buf());
-        // Tier 2 (Express) should win over Tier 4 (Node.js).
+        // Tier 2 (Express) should win over Tier 3 (Node.js).
         assert_eq!(detect_framework(&info), Some("Express".to_string()));
     }
 
@@ -556,5 +587,58 @@ mod tests {
         let ports = vec![info];
         let result = resolve_frameworks(ports);
         assert_eq!(result[0].framework, Some("Flask".to_string()));
+    }
+
+    // ── Bug regression: runtime wins over config file ─────
+
+    #[test]
+    fn process_name_wins_over_config_file_for_known_runtime() {
+        // A `node` process whose ancestor dir happens to contain
+        // Cargo.toml must NOT be labeled "Rust". Tier-3 config-file
+        // detection is a last resort, used only when the process name
+        // doesn't itself identify the runtime.
+        clear_cache();
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let mut info = make_port_info(); // process_name = "node"
+        info.cwd = Some(dir.path().to_path_buf());
+        assert_eq!(detect_framework(&info), Some("Node.js".to_string()));
+    }
+
+    #[test]
+    fn config_file_used_when_process_name_unknown() {
+        // A non-runtime binary (the actual Rust server) running from
+        // its own Cargo.toml dir SHOULD report "Rust" via Tier-3.
+        clear_cache();
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+
+        let mut info = make_port_info();
+        info.process_name = "myapp".to_string();
+        info.cwd = Some(dir.path().to_path_buf());
+        assert_eq!(detect_framework(&info), Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn package_json_dep_still_wins_over_process_name() {
+        // Tier-2 (package.json dep) is project-confirmed and trumps
+        // the generic process-name label — a `node` process in a
+        // Next.js project is Next.js, not Node.js.
+        clear_cache();
+        let dir = TempDir::new().unwrap();
+        let pkg = r#"{"dependencies":{"next":"14"}}"#;
+        fs::write(dir.path().join("package.json"), pkg).unwrap();
+
+        let mut info = make_port_info();
+        info.cwd = Some(dir.path().to_path_buf());
+        assert_eq!(detect_framework(&info), Some("Next.js".to_string()));
+    }
+
+    #[test]
+    fn bun_process_reports_bun() {
+        let mut info = make_port_info();
+        info.process_name = "bun".to_string();
+        assert_eq!(detect_process_name(&info), Some("Bun".to_string()));
     }
 }
