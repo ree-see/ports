@@ -118,6 +118,20 @@ pub enum HistoryAction {
         /// Include established connections (not just listening ports)
         #[arg(short, long)]
         connections: bool,
+        /// Disable the periodic auto-prune that fires every ~100 minutes
+        /// on a 5-minute cron. Also respected via env
+        /// `PORTLS_HISTORY_NO_PRUNE=1`.
+        #[arg(long)]
+        no_auto_prune: bool,
+        /// Override the default 720-hour (30-day) auto-prune retention
+        /// window. Minimum 1 hour; rejected at 0 to avoid pruning the
+        /// snapshot we just recorded.
+        #[arg(
+            long,
+            value_name = "HOURS",
+            value_parser = clap::value_parser!(u64).range(1..=8760 * 100)
+        )]
+        auto_prune_hours: Option<u64>,
     },
     /// Show recorded history
     Show {

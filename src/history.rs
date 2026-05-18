@@ -8,6 +8,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, Connection};
 
+use colored::Colorize;
+
 use crate::platform;
 
 const DB_NAME: &str = "ports_history.db";
@@ -123,9 +125,74 @@ pub fn open_db() -> Result<Connection> {
     Ok(conn)
 }
 
-/// Record the current port state as a snapshot
-pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
+/// Controls auto-prune behaviour for a single `record_snapshot` call.
+///
+/// Built by the CLI layer from `--no-auto-prune`,
+/// `--auto-prune-hours`, and `PORTLS_HISTORY_NO_PRUNE`. Tests
+/// construct it directly with smaller knobs.
+pub struct AutoPruneConfig {
+    /// Run the cleanup at all. Off when the user sets `--no-auto-prune`
+    /// or `PORTLS_HISTORY_NO_PRUNE=1`.
+    pub enabled: bool,
+    /// Number of `record_snapshot` calls between automatic prunes.
+    /// Not user-configurable — exposing it would invite bikeshedding
+    /// with no observable difference (see plan note N1).
+    pub interval: u32,
+    /// Retention window in hours for the automatic prune.
+    pub keep_hours: i64,
+    /// Threshold above which `record_snapshot` prints a stderr warning
+    /// that the DB has grown unusually large.
+    pub warn_size_bytes: u64,
+}
+
+impl Default for AutoPruneConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval: 20,
+            keep_hours: 720,
+            warn_size_bytes: 500 * 1024 * 1024,
+        }
+    }
+}
+
+/// Side-channel return from `record_snapshot_with_conn` so tests can
+/// inspect the size-warning state without capturing stderr. The public
+/// `record_snapshot` wrapper eprintln's it (consistent with the
+/// `output::table::print_warning` docker pattern: stderr in both
+/// table and JSON modes).
+#[derive(Debug, Clone)]
+pub struct SizeWarning {
+    pub size_bytes: u64,
+}
+
+/// Record the current port state as a snapshot.
+///
+/// Honors the auto-prune config: increments a persistent counter,
+/// fires `cleanup_impl` without VACUUM every `interval` calls, and
+/// prints a stderr warning if the on-disk size exceeds the configured
+/// threshold.
+pub fn record_snapshot(
+    include_connections: bool,
+    auto_prune: &AutoPruneConfig,
+) -> Result<RecordResult> {
     let conn = open_db()?;
+    let (result, warning) = record_snapshot_with_conn(&conn, include_connections, auto_prune)?;
+    if let Some(SizeWarning { size_bytes }) = warning {
+        let line = format!(
+            "warning: history DB is {}; consider 'ports history clean --keep <hours>'",
+            format_bytes(size_bytes)
+        );
+        eprintln!("{}", line.yellow());
+    }
+    Ok(result)
+}
+
+fn record_snapshot_with_conn(
+    conn: &Connection,
+    include_connections: bool,
+    auto_prune: &AutoPruneConfig,
+) -> Result<(RecordResult, Option<SizeWarning>)> {
     let now = Utc::now();
 
     // Get current ports. History records all observations and does not
@@ -135,21 +202,19 @@ pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
     if include_connections {
         all_ports.extend(platform::get_connections()?.ports);
     }
-    // Insert snapshot
+
     conn.execute(
         "INSERT INTO snapshots (timestamp, unix_ts) VALUES (?1, ?2)",
         params![now.to_rfc3339(), now.timestamp()],
     )?;
     let snapshot_id = conn.last_insert_rowid();
 
-    // Insert ports
     let mut stmt = conn.prepare(
         "INSERT INTO ports (snapshot_id, port, protocol, address, pid, process_name, container, state, remote_addr)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
     )?;
 
     for port in &all_ports {
-        // Determine state based on whether this is a listening port or connection
         let state: Option<&str> = if port.remote_address.is_some() {
             Some("ESTABLISHED")
         } else {
@@ -168,12 +233,66 @@ pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
             port.remote_address,
         ])?;
     }
+    drop(stmt);
 
-    Ok(RecordResult {
+    if auto_prune.enabled {
+        let counter = increment_counter(conn)?;
+        if counter >= auto_prune.interval {
+            // Skip VACUUM in the auto path: the freed pages get reused
+            // by future inserts, and VACUUM on a multi-GB DB blocks
+            // the snapshot for seconds. Manual `clean` still VACUUMs.
+            cleanup_impl(conn, auto_prune.keep_hours, false)?;
+            reset_counter(conn)?;
+        }
+    }
+
+    let size = db_size_bytes(conn)?;
+    let warning = if size > auto_prune.warn_size_bytes {
+        Some(SizeWarning { size_bytes: size })
+    } else {
+        None
+    };
+
+    let result = RecordResult {
         snapshot_id,
         port_count: all_ports.len(),
         timestamp: now,
-    })
+    };
+    Ok((result, warning))
+}
+
+/// Atomically increment the auto-prune counter and return its new
+/// value. Uses `RETURNING` (SQLite 3.35+; rusqlite 0.32 bundles 3.46)
+/// so the read sees exactly what this statement wrote, with no
+/// UPDATE-then-SELECT race window. Two racing record processes can
+/// still both reach the threshold and both trigger cleanup — that's
+/// the inherent "two DELETEs in flight" case the plan accepts; SQLite
+/// serializes the file-lock writes and the second DELETE is a near
+/// no-op.
+fn increment_counter(conn: &Connection) -> Result<u32> {
+    let new_val: i64 = conn.query_row(
+        "UPDATE meta \
+           SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) \
+           WHERE key = 'auto_prune_counter' \
+           RETURNING CAST(value AS INTEGER)",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(new_val.max(0) as u32)
+}
+
+fn reset_counter(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE meta SET value = '0' WHERE key = 'auto_prune_counter'",
+        [],
+    )?;
+    Ok(())
+}
+
+fn db_size_bytes(conn: &Connection) -> Result<u64> {
+    let pc: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+    let ps: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+    Ok((pc.max(0) as u64) * (ps.max(0) as u64))
 }
 
 pub struct RecordResult {
@@ -321,12 +440,19 @@ pub struct HistoryStats {
     pub db_size_bytes: u64,
 }
 
-/// Clean up old history entries
+/// Clean up old history entries. Runs VACUUM to reclaim disk space
+/// — that's why this is the user-invoked path (manual
+/// `ports history clean --keep N`). The auto-prune path uses
+/// `cleanup_impl` directly with `vacuum=false` to avoid the
+/// multi-second blast on large DBs.
 pub fn cleanup(keep_hours: i64) -> Result<CleanupResult> {
     let conn = open_db()?;
+    cleanup_impl(&conn, keep_hours, true)
+}
+
+fn cleanup_impl(conn: &Connection, keep_hours: i64, vacuum: bool) -> Result<CleanupResult> {
     let cutoff = Utc::now() - Duration::hours(keep_hours);
 
-    // Count what we're about to delete
     let snapshot_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM snapshots WHERE unix_ts < ?",
         params![cutoff.timestamp()],
@@ -339,14 +465,14 @@ pub fn cleanup(keep_hours: i64) -> Result<CleanupResult> {
         |row| row.get(0),
     )?;
 
-    // Delete old snapshots (cascades to ports)
     conn.execute(
         "DELETE FROM snapshots WHERE unix_ts < ?",
         params![cutoff.timestamp()],
     )?;
 
-    // Vacuum to reclaim space
-    conn.execute_batch("VACUUM;")?;
+    if vacuum {
+        conn.execute_batch("VACUUM;")?;
+    }
 
     Ok(CleanupResult {
         snapshots_deleted: snapshot_count as usize,
@@ -650,6 +776,164 @@ mod tests {
         assert!(
             msg.contains("invalid"),
             "error should mention 'invalid': {msg}"
+        );
+    }
+
+    /// Seed `n` snapshots backdated to `now - hours_ago` (no `ports`
+    /// rows — auto-prune only inspects the `snapshots` table for the
+    /// cutoff). Returns the number of rows inserted for sanity.
+    fn seed_backdated_snapshots(conn: &Connection, n: usize, hours_ago: i64) -> usize {
+        let cutoff = (Utc::now() - Duration::hours(hours_ago)).timestamp();
+        for _ in 0..n {
+            conn.execute(
+                "INSERT INTO snapshots (timestamp, unix_ts) VALUES ('seed', ?1)",
+                params![cutoff],
+            )
+            .expect("seed snapshot");
+        }
+        n
+    }
+
+    fn snapshot_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))
+            .expect("snapshots count")
+    }
+
+    fn page_count(conn: &Connection) -> i64 {
+        conn.query_row("PRAGMA page_count", [], |r| r.get(0))
+            .expect("page_count")
+    }
+
+    fn manual_record(conn: &Connection, auto_prune: &AutoPruneConfig) -> Option<SizeWarning> {
+        // record_snapshot_with_conn calls into platform::get_listening_ports,
+        // which triggers OS work and returns whatever's actually listening.
+        // We don't care about the contents here — only the snapshot row
+        // and the auto-prune side-effects. The integration tests cover
+        // the platform path end-to-end.
+        let (_, warning) =
+            record_snapshot_with_conn(conn, false, auto_prune).expect("record_snapshot_with_conn");
+        warning
+    }
+
+    #[test]
+    fn auto_prune_triggers_on_nth_record() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("init");
+        seed_backdated_snapshots(&conn, 5, 2);
+
+        let cfg = AutoPruneConfig {
+            enabled: true,
+            interval: 3,
+            keep_hours: 1,
+            warn_size_bytes: u64::MAX,
+        };
+
+        manual_record(&conn, &cfg); // counter=1
+        manual_record(&conn, &cfg); // counter=2
+                                    // Backdated seeds still present so far.
+        assert!(
+            snapshot_count(&conn) >= 5,
+            "seeds must still be present before threshold"
+        );
+
+        manual_record(&conn, &cfg); // counter=3 -> triggers cleanup + reset
+
+        // After the auto-prune, every snapshot older than keep_hours=1
+        // is gone. The three record_snapshot calls inserted snapshots
+        // with `now` timestamps, so they survive.
+        assert_eq!(
+            snapshot_count(&conn),
+            3,
+            "auto-prune should keep only the 3 just-recorded snapshots"
+        );
+        assert_eq!(
+            counter_value(&conn),
+            "0",
+            "counter should reset after triggering"
+        );
+    }
+
+    #[test]
+    fn auto_prune_disabled_never_calls_cleanup() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("init");
+        seed_backdated_snapshots(&conn, 3, 100);
+
+        let cfg = AutoPruneConfig {
+            enabled: false,
+            interval: 1,
+            keep_hours: 1,
+            warn_size_bytes: u64::MAX,
+        };
+        for _ in 0..5 {
+            manual_record(&conn, &cfg);
+        }
+        assert_eq!(
+            snapshot_count(&conn),
+            8,
+            "all 3 backdated + 5 new snapshots must remain when disabled"
+        );
+        // Counter must not have advanced either.
+        assert_eq!(counter_value(&conn), "0");
+    }
+
+    #[test]
+    fn auto_prune_skips_vacuum() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("init");
+        // Seed enough backdated snapshots to span multiple pages so
+        // a hypothetical VACUUM would have something to reclaim.
+        seed_backdated_snapshots(&conn, 1000, 100);
+        let before = page_count(&conn);
+
+        let cfg = AutoPruneConfig {
+            enabled: true,
+            interval: 1,
+            keep_hours: 1,
+            warn_size_bytes: u64::MAX,
+        };
+        manual_record(&conn, &cfg); // counter=1 -> triggers prune (no vacuum)
+
+        let after = page_count(&conn);
+        assert!(
+            after >= before,
+            "auto-prune must NOT shrink page_count (VACUUM is skipped): before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn cleanup_with_vacuum_shrinks_page_count() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("init");
+        seed_backdated_snapshots(&conn, 1000, 100);
+        let before = page_count(&conn);
+
+        cleanup_impl(&conn, 1, true).expect("cleanup with vacuum");
+
+        let after = page_count(&conn);
+        assert!(
+            after < before,
+            "cleanup with vacuum must shrink page_count: before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn size_warning_returns_side_channel_warning() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("init");
+
+        let cfg = AutoPruneConfig {
+            enabled: false,
+            interval: u32::MAX,
+            keep_hours: 720,
+            warn_size_bytes: 1, // any non-empty DB trips this
+        };
+        let warning = manual_record(&conn, &cfg);
+        let w = warning.expect("warning must fire above 1-byte threshold");
+        assert!(
+            w.size_bytes > 1,
+            "reported size_bytes should reflect the actual DB size, got {}",
+            w.size_bytes
         );
     }
 

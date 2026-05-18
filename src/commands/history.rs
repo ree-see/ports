@@ -7,11 +7,26 @@ use comfy_table::{
     presets::UTF8_FULL_CONDENSED, Attribute, Cell, Color, ContentArrangement, Table,
 };
 
-use crate::history::{self, DiffAction, HistoryQuery};
+use crate::history::{self, AutoPruneConfig, DiffAction, HistoryQuery};
 
 /// Record a snapshot of current port state
-pub fn record(include_connections: bool, json: bool) -> Result<()> {
-    let result = history::record_snapshot(include_connections)?;
+pub fn record(
+    include_connections: bool,
+    json: bool,
+    no_auto_prune: bool,
+    auto_prune_hours: Option<u64>,
+) -> Result<()> {
+    let no_prune_env = std::env::var_os("PORTLS_HISTORY_NO_PRUNE")
+        .map(|v| !v.is_empty() && v != "0")
+        .unwrap_or(false);
+    let auto_prune = AutoPruneConfig {
+        enabled: !(no_auto_prune || no_prune_env),
+        keep_hours: auto_prune_hours
+            .map(|h| h as i64)
+            .unwrap_or(AutoPruneConfig::default().keep_hours),
+        ..AutoPruneConfig::default()
+    };
+    let result = history::record_snapshot(include_connections, &auto_prune)?;
 
     if json {
         let output = serde_json::json!({

@@ -230,7 +230,11 @@ fn run_top(_connections: bool, _dev: bool) -> Result<()> {
 #[cfg(feature = "history")]
 fn run_history(action: &cli::HistoryAction, json: bool) -> Result<()> {
     match action {
-        cli::HistoryAction::Record { connections } => commands::history::record(*connections, json),
+        cli::HistoryAction::Record {
+            connections,
+            no_auto_prune,
+            auto_prune_hours,
+        } => commands::history::record(*connections, json, *no_auto_prune, *auto_prune_hours),
         cli::HistoryAction::Show {
             port,
             process,
