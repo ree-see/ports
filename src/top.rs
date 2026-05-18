@@ -194,22 +194,18 @@ fn run_loop(
                         KeyCode::Char('n') => state.sort = SortField::Name,
 
                         // Kill
-                        KeyCode::Char('k') => {
-                            if !ports.is_empty() {
-                                state.confirm_kill = true;
-                            }
+                        KeyCode::Char('k') if !ports.is_empty() => {
+                            state.confirm_kill = true;
                         }
 
                         // Navigation
-                        KeyCode::Up | KeyCode::Char('K') => {
-                            if state.selected > 0 {
-                                state.selected -= 1;
-                            }
+                        KeyCode::Up | KeyCode::Char('K') if state.selected > 0 => {
+                            state.selected -= 1;
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if state.selected < ports.len().saturating_sub(1) {
-                                state.selected += 1;
-                            }
+                        KeyCode::Down | KeyCode::Char('j')
+                            if state.selected < ports.len().saturating_sub(1) =>
+                        {
+                            state.selected += 1;
                         }
                         KeyCode::PageUp => {
                             let (_, height) = terminal::size()?;
