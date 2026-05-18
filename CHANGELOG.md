@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) gating every push and pull request to `main`/`dev` on `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --all-targets --locked`. Matrix runs on `ubuntu-latest` and `macos-latest` so Linux/macOS asymmetries surface before publish.
+
 ### Changed
 
 - **BREAKING**: `ports completions <shell>` now installs the completion file

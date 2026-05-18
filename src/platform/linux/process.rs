@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_parse_cmdline_normal() {
-        let input = b"/usr/bin/node\0server.js\0--port\03000\0";
+        let input = b"/usr/bin/node\0server.js\0--port\x003000\0";
         assert_eq!(
             parse_cmdline(input),
             Some("/usr/bin/node server.js --port 3000".to_string())
