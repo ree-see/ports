@@ -18,21 +18,30 @@
 //! - **Linux**: Native `/proc/net` parsing for TCP, TCP6, UDP, UDP6
 //! - **macOS**: Uses `lsof` for connections, `listeners` crate for listening ports
 //! - **Others**: Generic fallback via `listeners` crate
+//!
+//! ## Library API
+//!
+//! This crate ships a binary (`ports`); the library exists only so that
+//! `main.rs` can stay a thin shim. The surface is intentionally minimal —
+//! only [`Cli`] and [`run`] are exported — and is **not** part of the
+//! crate's public API for semver purposes. Internal modules are
+//! crate-private and may change shape or disappear in any release.
+//! Depending on `portls` as a library is not a supported integration.
 
-pub mod ancestry;
-pub mod cli;
-pub mod commands;
-pub mod docker;
-pub mod filter;
-pub mod framework;
-pub mod history;
-pub mod interactive;
-pub mod output;
-pub mod platform;
-pub mod project;
-pub mod top;
-pub mod types;
-pub mod watch;
+pub(crate) mod ancestry;
+pub(crate) mod cli;
+pub(crate) mod commands;
+pub(crate) mod docker;
+pub(crate) mod filter;
+pub(crate) mod framework;
+pub(crate) mod history;
+pub(crate) mod interactive;
+pub(crate) mod output;
+pub(crate) mod platform;
+pub(crate) mod project;
+pub(crate) mod top;
+pub(crate) mod types;
+pub(crate) mod watch;
 
 pub use cli::Cli;
 

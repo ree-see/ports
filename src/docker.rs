@@ -12,17 +12,8 @@ use anyhow::Result;
 /// Container information from the Docker daemon.
 #[derive(Debug, Clone)]
 pub struct ContainerInfo {
-    pub id: String,
     pub name: String,
     pub image: Option<String>,
-    pub ports: Vec<(u16, u16)>, // (host_port, container_port)
-}
-
-impl ContainerInfo {
-    /// Get a display string for this container.
-    pub fn display_name(&self) -> &str {
-        &self.name
-    }
 }
 
 type PortCache = Option<(Instant, HashMap<u16, ContainerInfo>)>;
@@ -78,14 +69,6 @@ async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
     let mut mappings: HashMap<u16, ContainerInfo> = HashMap::new();
 
     for container in containers {
-        let id = container
-            .id
-            .as_deref()
-            .unwrap_or("")
-            .chars()
-            .take(12)
-            .collect::<String>();
-
         let name = container
             .names
             .as_ref()
@@ -95,29 +78,17 @@ async fn fetch_from_bollard() -> Result<HashMap<u16, ContainerInfo>> {
 
         let image = container.image.clone();
 
-        let mut port_pairs: Vec<(u16, u16)> = Vec::new();
+        let info = ContainerInfo { name, image };
 
         if let Some(ports) = container.ports {
             for p in &ports {
                 if p.typ != Some(PortTypeEnum::TCP) && p.typ != Some(PortTypeEnum::UDP) {
                     continue;
                 }
-                if let (Some(host_port), Some(private_port)) = (p.public_port, Some(p.private_port))
-                {
-                    port_pairs.push((host_port, private_port));
+                if let Some(host_port) = p.public_port {
+                    mappings.insert(host_port, info.clone());
                 }
             }
-        }
-
-        let info = ContainerInfo {
-            id,
-            name,
-            image,
-            ports: port_pairs.clone(),
-        };
-
-        for (host_port, _) in port_pairs {
-            mappings.insert(host_port, info.clone());
         }
     }
 
@@ -129,27 +100,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_container_info_display_name() {
-        let info = ContainerInfo {
-            id: "abc123".to_string(),
-            name: "my-container".to_string(),
-            image: Some("nginx:latest".to_string()),
-            ports: vec![(3000, 80)],
-        };
-        assert_eq!(info.display_name(), "my-container");
-    }
-
-    #[test]
     fn test_get_container_image_from_cache() {
         // Populate the cache manually for testing.
         let mut map = HashMap::new();
         map.insert(
             8080,
             ContainerInfo {
-                id: "abc123".to_string(),
                 name: "web".to_string(),
                 image: Some("postgres:16".to_string()),
-                ports: vec![(8080, 5432)],
             },
         );
         *DOCKER_CACHE.lock().unwrap() = Some((Instant::now(), map));

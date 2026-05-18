@@ -73,6 +73,10 @@ impl std::fmt::Display for SourceType {
 /// Health warnings detected for a process.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+// Constructed only by the linux ancestry path (`ancestry::linux`); appears
+// dead on macOS because `ancestry::linux` is `cfg(target_os = "linux")`-gated.
+// Do not delete these variants — they are part of the production Linux flow.
+#[allow(dead_code)]
 pub enum HealthWarning {
     DeletedBinary,
     ZombieProcess,

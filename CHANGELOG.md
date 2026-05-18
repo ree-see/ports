@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supported — use `--print` and redirect manually. Migration: if you had
   `ports completions fish > file` in your dotfiles, change it to
   `ports completions fish --print > file`.
+- **BREAKING**: the library API is trimmed to `portls::Cli` and `portls::run`
+  only. All other modules (`portls::framework`, `portls::types`,
+  `portls::platform`, `portls::commands`, etc.) are now crate-private and
+  cannot be imported by downstream library consumers. `portls` ships a binary
+  (`ports`); the library surface is intentionally minimal and is **not**
+  considered part of the crate's public API for semver purposes. Downstream
+  library consumers (none known) should pin to `0.3.x` or vendor the modules
+  they depend on. The `ports` binary is unaffected.
 
 ### Fixed
 

@@ -323,10 +323,8 @@ mod tests {
         map.insert(
             3000,
             docker::ContainerInfo {
-                id: "abc".into(),
                 name: "my-pg".into(),
                 image: Some("postgres:16-alpine".into()),
-                ports: vec![(3000, 5432)],
             },
         );
         *docker::DOCKER_CACHE.lock().unwrap() = Some((std::time::Instant::now(), map));
@@ -338,10 +336,8 @@ mod tests {
         map.insert(
             3000,
             docker::ContainerInfo {
-                id: "abc".into(),
                 name: "custom-app".into(),
                 image: Some("my-org/custom-thing:latest".into()),
-                ports: vec![(3000, 8080)],
             },
         );
         *docker::DOCKER_CACHE.lock().unwrap() = Some((std::time::Instant::now(), map));

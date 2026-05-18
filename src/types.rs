@@ -173,17 +173,6 @@ impl PortInfo {
         }
     }
 
-    /// Check whether this port is bound to a public/wildcard address.
-    ///
-    /// Returns `true` for `0.0.0.0`, `::`, `*`, and `[::]` prefixes.
-    pub fn is_public_binding(&self) -> bool {
-        let addr = &self.address;
-        addr.starts_with("0.0.0.0:")
-            || addr.starts_with(":::")
-            || addr.starts_with("*:")
-            || addr.starts_with("[::]:")
-    }
-
     /// Enrich ports with Docker container information.
     ///
     /// For ports forwarded by `docker-proxy`, adds the container name.

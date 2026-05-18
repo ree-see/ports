@@ -1,3 +1,8 @@
+// Compiled on Linux too (via `cfg(any(target_os = "macos", test))` upstream)
+// so the macOS unit tests run cross-platform. The non-test, non-macOS build
+// never calls these items, so dead-code analysis flags them on Linux.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;

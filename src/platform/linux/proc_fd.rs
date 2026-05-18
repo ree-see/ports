@@ -1,3 +1,8 @@
+// See sibling `mod.rs` for why this file allows dead code: the linux platform
+// module is compiled on macOS to keep its unit tests cross-platform, and the
+// production items are then unused outside linux.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;

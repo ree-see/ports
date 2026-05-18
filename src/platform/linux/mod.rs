@@ -1,3 +1,8 @@
+// Compiled on macOS too (via `cfg(any(target_os = "linux", test))` upstream) so
+// the linux unit tests run cross-platform. The non-test, non-linux build never
+// calls these items, so dead-code analysis flags them on macOS.
+#![allow(dead_code)]
+
 pub mod proc_fd;
 pub mod proc_parser;
 pub mod process;
