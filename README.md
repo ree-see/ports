@@ -175,11 +175,13 @@ Track port usage over time with SQLite-backed history:
 ```bash
 ports history record        # Take a snapshot (run via cron)
 ports history record -c     # Include established connections
+ports history record --no-auto-prune                # Disable auto-prune for this call
+ports history record --auto-prune-hours 168         # One-week retention instead of 30-day default
 ports history show          # View recent history
 ports history show --port 80 --hours 48
 ports history timeline 22   # Timeline for specific port
 ports history stats         # Database statistics
-ports history clean --keep 168  # Keep only 1 week (hours)
+ports history clean --keep 168  # One-shot prune to a specific window (hours)
 ports history diff          # Show ports that appeared/disappeared since last snapshot
 ports history diff --ago 5  # Diff against 5 snapshots ago
 ```
@@ -199,6 +201,8 @@ Example cron job for continuous monitoring:
 # Record port state every 5 minutes
 */5 * * * * /usr/local/bin/ports history record
 ```
+
+`ports history record` keeps the database from growing forever by auto-pruning anything older than 30 days every ~100 minutes on a 5-minute cron (every 20th record call, no VACUUM to keep the snapshot fast). Override the window with `--auto-prune-hours <HOURS>` or disable entirely with `--no-auto-prune` / `PORTLS_HISTORY_NO_PRUNE=1`. Use `history clean --keep <hours>` for a one-shot prune that also runs VACUUM to reclaim disk space.
 
 History data is stored in `~/.local/share/ports/ports_history.db`.
 

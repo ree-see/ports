@@ -15,8 +15,27 @@ fn run_ports_with_temp_home(args: &[&str], temp_home: &TempDir) -> std::process:
         .args(args)
         .env("HOME", temp_home.path())
         .env("XDG_DATA_HOME", temp_home.path().join(".local/share"))
+        .env_remove("PORTLS_HISTORY_NO_PRUNE")
         .output()
         .expect("Failed to execute command")
+}
+
+/// Same as `run_ports_with_temp_home` but lets the caller add extra env vars
+/// (needed for the PORTLS_HISTORY_NO_PRUNE smoke test).
+fn run_ports_with_env(
+    args: &[&str],
+    temp_home: &TempDir,
+    extra_env: &[(&str, &str)],
+) -> std::process::Output {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["run", "--"])
+        .args(args)
+        .env("HOME", temp_home.path())
+        .env("XDG_DATA_HOME", temp_home.path().join(".local/share"));
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("Failed to execute command")
 }
 
 /// Run ports command and return (success, stdout, stderr)
@@ -448,4 +467,80 @@ fn test_repeated_records_increment_snapshots() {
     let stats: serde_json::Value = serde_json::from_str(&stdout).expect("parse stats");
     let snapshot_count = stats["snapshot_count"].as_u64().unwrap_or(0);
     assert_eq!(snapshot_count, 3, "Expected 3 snapshots after 3 records");
+}
+
+// ============================================================================
+// auto-prune CLI surface
+// ============================================================================
+
+#[test]
+fn test_record_no_auto_prune_flag() {
+    let temp_home = TempDir::new().expect("Failed to create temp dir");
+    let (success, stdout, stderr) =
+        run_and_capture(&["history", "record", "--no-auto-prune"], &temp_home);
+    assert!(success, "record --no-auto-prune failed: {}", stderr);
+    assert!(
+        stdout.contains("Recorded"),
+        "Expected confirmation, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_record_env_disables_auto_prune() {
+    let temp_home = TempDir::new().expect("Failed to create temp dir");
+    let output = run_ports_with_env(
+        &["history", "record"],
+        &temp_home,
+        &[("PORTLS_HISTORY_NO_PRUNE", "1")],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(
+        output.status.success(),
+        "record with PORTLS_HISTORY_NO_PRUNE=1 failed: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("Recorded"),
+        "Expected confirmation, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_record_with_auto_prune_hours() {
+    let temp_home = TempDir::new().expect("Failed to create temp dir");
+    let (success, stdout, stderr) = run_and_capture(
+        &["history", "record", "--auto-prune-hours", "1"],
+        &temp_home,
+    );
+    assert!(success, "record --auto-prune-hours 1 failed: {}", stderr);
+    assert!(
+        stdout.contains("Recorded"),
+        "Expected confirmation, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_record_rejects_auto_prune_hours_zero() {
+    let temp_home = TempDir::new().expect("Failed to create temp dir");
+    let (success, _stdout, stderr) = run_and_capture(
+        &["history", "record", "--auto-prune-hours", "0"],
+        &temp_home,
+    );
+    assert!(
+        !success,
+        "--auto-prune-hours 0 must be rejected at parse time"
+    );
+    // clap range validators write the violation to stderr; the exact
+    // wording differs across clap versions but always includes the
+    // out-of-range value or the bound. Either is enough to be sure
+    // the rejection came from the validator and not some runtime path.
+    assert!(
+        stderr.contains("0") || stderr.contains("range") || stderr.contains("not in"),
+        "Expected clap range error mentioning the value, got: {}",
+        stderr
+    );
 }
