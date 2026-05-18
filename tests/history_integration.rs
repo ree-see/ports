@@ -3,6 +3,8 @@
 //! These tests use a temporary directory for the history database to avoid
 //! polluting the user's actual history data.
 
+#![cfg(feature = "history")]
+
 use std::process::Command;
 use tempfile::TempDir;
 

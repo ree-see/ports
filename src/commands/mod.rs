@@ -1,3 +1,4 @@
+#[cfg(feature = "history")]
 pub mod history;
 pub mod kill;
 pub mod list;

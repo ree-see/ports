@@ -19,6 +19,26 @@ cargo install --path .
 
 This installs the `ports` command.
 
+### Cargo features
+
+`portls` ships four optional features, all default-on, so `cargo install portls` keeps the full feature set:
+
+| Feature | Pulls in | Enables |
+|---------|----------|---------|
+| `docker` | `bollard`, `tokio` | Container name + image-based framework detection |
+| `tui` | `ratatui`, `crossterm`, `dialoguer` | `ports top`, `-i/--interactive` picker |
+| `history` | `rusqlite-bundled`, `chrono` | `ports history` subcommand |
+| `watch` | — | `-w/--watch` live refresh loop |
+
+For a slim binary (~54% smaller release artifact on macOS), opt out:
+
+```bash
+cargo install portls --no-default-features          # core only: list/kill/query/why/completions
+cargo install portls --no-default-features --features docker,history   # mix and match
+```
+
+Subcommands and flags whose feature is off still appear in `--help` but return an actionable error at runtime, pointing to the right `--features` flag.
+
 ## Usage
 
 ### List all listening ports

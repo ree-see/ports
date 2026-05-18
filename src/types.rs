@@ -9,6 +9,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use crate::cli::{ProtocolFilter, SortField};
+#[cfg(feature = "docker")]
 use crate::docker;
 
 #[derive(Debug, Clone, Serialize)]
@@ -176,6 +177,7 @@ impl PortInfo {
     /// Enrich ports with Docker container information.
     ///
     /// For ports forwarded by `docker-proxy`, adds the container name.
+    #[cfg(feature = "docker")]
     pub fn enrich_with_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
         // Only fetch Docker info if we have docker-proxy entries
         let has_docker_proxy = ports
@@ -201,6 +203,12 @@ impl PortInfo {
                 p
             })
             .collect()
+    }
+
+    /// No-op when the `docker` feature is disabled.
+    #[cfg(not(feature = "docker"))]
+    pub fn enrich_with_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
+        ports
     }
 }
 

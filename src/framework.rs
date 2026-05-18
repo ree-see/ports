@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
+#[cfg(feature = "docker")]
 use crate::docker;
 use crate::project;
 use crate::types::PortInfo;
@@ -28,6 +29,7 @@ static PROJECT_FRAMEWORK_CACHE: LazyLock<Mutex<FrameworkCache>> =
 /// Called at the start of each watch/top refresh cycle so
 /// that file-system changes (new deps, new config files)
 /// are picked up.
+#[allow(dead_code)] // only used by watch/top features
 pub fn clear_cache() {
     PROJECT_FRAMEWORK_CACHE.lock().unwrap().clear();
 }
@@ -67,6 +69,7 @@ pub fn detect_framework(info: &PortInfo) -> Option<String> {
 // ── Tier 0: Docker image ────────────────────────────────
 
 /// Docker image substring → framework name.
+#[cfg(feature = "docker")]
 const DOCKER_IMAGE_PATTERNS: &[(&str, &str)] = &[
     ("postgres", "PostgreSQL"),
     ("redis", "Redis"),
@@ -82,6 +85,7 @@ const DOCKER_IMAGE_PATTERNS: &[(&str, &str)] = &[
     ("minio", "MinIO"),
 ];
 
+#[cfg(feature = "docker")]
 fn detect_docker_image(info: &PortInfo) -> Option<String> {
     info.container.as_ref()?;
     let image = match docker::get_container_image(info.port) {
@@ -97,6 +101,11 @@ fn detect_docker_image(info: &PortInfo) -> Option<String> {
     }
     // Container present but unknown image pattern.
     Some("Docker".to_string())
+}
+
+#[cfg(not(feature = "docker"))]
+fn detect_docker_image(_info: &PortInfo) -> Option<String> {
+    None
 }
 
 // ── Tier 1: Command-line patterns ───────────────────────
@@ -311,6 +320,7 @@ mod tests {
     // Consolidated into one test to avoid parallel-test
     // race conditions on the shared global DOCKER_CACHE.
 
+    #[cfg(feature = "docker")]
     #[test]
     fn tier0_docker_image_detection() {
         // Sub-case 1: no container → skip tier 0.

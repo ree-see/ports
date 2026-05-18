@@ -10,6 +10,7 @@ pub fn print_ports(ports: &[PortInfo]) {
     print_ports_inner(ports, &HashSet::new())
 }
 
+#[allow(dead_code)] // only used by the `watch` feature
 pub fn print_ports_watch(ports: &[PortInfo], new_ports: &HashSet<&PortInfo>) {
     print_ports_inner(ports, new_ports)
 }

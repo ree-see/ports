@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cargo features gate the heaviest dependencies. Four features, all default-on, preserve `cargo install portls` behaviour: `docker` (`bollard`, `tokio`), `tui` (`ratatui`, `crossterm`, `dialoguer`), `history` (`rusqlite-bundled`, `chrono`), and `watch` (code-only gate, no extra deps). Install a slim binary with `cargo install portls --no-default-features` (drops Docker, the TUI, history, and watch mode — roughly a 54% release-binary size cut on macOS). Mix and match with `--features` for everything in between. Subcommands and flags whose feature is disabled return a clear runtime error instructing the user how to rebuild.
 - GitHub Actions CI workflow (`.github/workflows/ci.yml`) gating every push and pull request to `main`/`dev` on `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --all-targets --locked`. Matrix runs on `ubuntu-latest` and `macos-latest` so Linux/macOS asymmetries surface before publish.
 
 ### Changed

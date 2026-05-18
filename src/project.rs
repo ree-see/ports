@@ -53,6 +53,7 @@ pub fn find_project_root(cwd: &Path) -> Option<PathBuf> {
 ///
 /// Called at the start of each watch/top refresh cycle so
 /// that project root changes are picked up.
+#[allow(dead_code)] // only used by watch/top features
 pub fn clear_cache() {
     PROJECT_ROOT_CACHE.lock().unwrap().clear();
 }

@@ -31,16 +31,21 @@
 pub(crate) mod ancestry;
 pub(crate) mod cli;
 pub(crate) mod commands;
+#[cfg(feature = "docker")]
 pub(crate) mod docker;
 pub(crate) mod filter;
 pub(crate) mod framework;
+#[cfg(feature = "history")]
 pub(crate) mod history;
+#[cfg(feature = "tui")]
 pub(crate) mod interactive;
 pub(crate) mod output;
 pub(crate) mod platform;
 pub(crate) mod project;
+#[cfg(feature = "tui")]
 pub(crate) mod top;
 pub(crate) mod types;
+#[cfg(feature = "watch")]
 pub(crate) mod watch;
 
 pub use cli::Cli;
@@ -49,13 +54,10 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
-
-use types::PortInfo;
 
 pub fn run(cli: Cli) -> Result<()> {
     if cli.interactive {
@@ -63,37 +65,7 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     if cli.watch {
-        let filter = match &cli.command {
-            Some(cli::Commands::List) => None,
-            Some(cli::Commands::Kill { .. }) => {
-                anyhow::bail!("Cannot use --watch with kill command");
-            }
-            Some(cli::Commands::Completions { .. }) => {
-                anyhow::bail!("Cannot use --watch with completions command");
-            }
-            Some(cli::Commands::Top { .. }) => {
-                anyhow::bail!("Cannot use --watch with top command (top has its own refresh)");
-            }
-            Some(cli::Commands::Why { .. }) => {
-                anyhow::bail!("Cannot use --watch with why command");
-            }
-            Some(cli::Commands::History { .. }) => {
-                anyhow::bail!("Cannot use --watch with history command");
-            }
-            None => cli.query.clone(),
-        };
-
-        return watch::run(watch::WatchOptions {
-            interval: Duration::from_secs_f64(cli.interval),
-            json: cli.json,
-            filter,
-            connections: cli.connections,
-            sort: cli.sort,
-            protocol: cli.protocol,
-            use_regex: cli.regex,
-            why: cli.why,
-            dev: cli.dev,
-        });
+        return run_watch(&cli);
     }
 
     match &cli.command {
@@ -112,7 +84,7 @@ pub fn run(cli: Cli) -> Result<()> {
             connections,
         }) => commands::kill::execute(target, *force, *all, *connections),
         Some(cli::Commands::Why { target }) => commands::why::execute(target, cli.json),
-        Some(cli::Commands::Top { connections }) => top::run(*connections, cli.dev),
+        Some(cli::Commands::Top { connections }) => run_top(*connections, cli.dev),
         Some(cli::Commands::Completions { shell, print }) => {
             if *print {
                 let mut cmd = Cli::command();
@@ -130,23 +102,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Some(cli::Commands::History { action }) => match action {
-            cli::HistoryAction::Record { connections } => {
-                commands::history::record(*connections, cli.json)
-            }
-            cli::HistoryAction::Show {
-                port,
-                process,
-                hours,
-                limit,
-            } => commands::history::show(*port, process.clone(), Some(*hours), *limit, cli.json),
-            cli::HistoryAction::Timeline { port, hours } => {
-                commands::history::timeline(*port, *hours, cli.json)
-            }
-            cli::HistoryAction::Stats => commands::history::stats(cli.json),
-            cli::HistoryAction::Clean { keep } => commands::history::cleanup(*keep, cli.json),
-            cli::HistoryAction::Diff { ago } => commands::history::diff(*ago, cli.json),
-        },
+        Some(cli::Commands::History { action }) => run_history(action, cli.json),
         None => match &cli.query {
             Some(query) => commands::query::execute(
                 query,
@@ -170,7 +126,10 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
+#[cfg(feature = "tui")]
 fn run_interactive(cli: &Cli) -> Result<()> {
+    use types::PortInfo;
+
     let ports = if cli.connections {
         platform::get_connections()?
     } else {
@@ -199,6 +158,99 @@ fn run_interactive(cli: &Cli) -> Result<()> {
     };
 
     interactive::select_and_kill(&ports, ancestry_map.as_ref())
+}
+
+#[cfg(not(feature = "tui"))]
+fn run_interactive(_cli: &Cli) -> Result<()> {
+    anyhow::bail!(
+        "this binary was built without the `tui` feature; \
+         rebuild with default features or `cargo install portls --features tui`"
+    )
+}
+
+#[cfg(feature = "watch")]
+fn run_watch(cli: &Cli) -> Result<()> {
+    let filter = match &cli.command {
+        Some(cli::Commands::List) => None,
+        Some(cli::Commands::Kill { .. }) => {
+            anyhow::bail!("Cannot use --watch with kill command");
+        }
+        Some(cli::Commands::Completions { .. }) => {
+            anyhow::bail!("Cannot use --watch with completions command");
+        }
+        Some(cli::Commands::Top { .. }) => {
+            anyhow::bail!("Cannot use --watch with top command (top has its own refresh)");
+        }
+        Some(cli::Commands::Why { .. }) => {
+            anyhow::bail!("Cannot use --watch with why command");
+        }
+        Some(cli::Commands::History { .. }) => {
+            anyhow::bail!("Cannot use --watch with history command");
+        }
+        None => cli.query.clone(),
+    };
+
+    watch::run(watch::WatchOptions {
+        interval: std::time::Duration::from_secs_f64(cli.interval),
+        json: cli.json,
+        filter,
+        connections: cli.connections,
+        sort: cli.sort,
+        protocol: cli.protocol,
+        use_regex: cli.regex,
+        why: cli.why,
+        dev: cli.dev,
+    })
+}
+
+#[cfg(not(feature = "watch"))]
+fn run_watch(_cli: &Cli) -> Result<()> {
+    anyhow::bail!(
+        "this binary was built without the `watch` feature; \
+         rebuild with default features or `cargo install portls --features watch`"
+    )
+}
+
+#[cfg(feature = "tui")]
+fn run_top(connections: bool, dev: bool) -> Result<()> {
+    top::run(connections, dev)
+}
+
+#[cfg(not(feature = "tui"))]
+fn run_top(_connections: bool, _dev: bool) -> Result<()> {
+    anyhow::bail!(
+        "this binary was built without the `tui` feature; \
+         the `top` subcommand requires it. Rebuild with default features \
+         or `cargo install portls --features tui`"
+    )
+}
+
+#[cfg(feature = "history")]
+fn run_history(action: &cli::HistoryAction, json: bool) -> Result<()> {
+    match action {
+        cli::HistoryAction::Record { connections } => commands::history::record(*connections, json),
+        cli::HistoryAction::Show {
+            port,
+            process,
+            hours,
+            limit,
+        } => commands::history::show(*port, process.clone(), Some(*hours), *limit, json),
+        cli::HistoryAction::Timeline { port, hours } => {
+            commands::history::timeline(*port, *hours, json)
+        }
+        cli::HistoryAction::Stats => commands::history::stats(json),
+        cli::HistoryAction::Clean { keep } => commands::history::cleanup(*keep, json),
+        cli::HistoryAction::Diff { ago } => commands::history::diff(*ago, json),
+    }
+}
+
+#[cfg(not(feature = "history"))]
+fn run_history(_action: &cli::HistoryAction, _json: bool) -> Result<()> {
+    anyhow::bail!(
+        "this binary was built without the `history` feature; \
+         the `history` subcommand requires it. Rebuild with default features \
+         or `cargo install portls --features history`"
+    )
 }
 
 fn build_fish_completions(cmd: &mut clap::Command) -> String {
