@@ -12,6 +12,10 @@ use crate::platform;
 
 const DB_NAME: &str = "ports_history.db";
 
+/// Highest schema version this binary understands. Bump alongside the
+/// migration ladder in `init_db`.
+const CURRENT_SCHEMA_VERSION: u32 = 2;
+
 /// Get the path to the history database
 fn db_path() -> Result<PathBuf> {
     let data_dir = dirs::data_local_dir()
@@ -24,9 +28,40 @@ fn db_path() -> Result<PathBuf> {
     Ok(ports_dir.join(DB_NAME))
 }
 
-/// Initialize the database schema
+/// Initialize the database schema.
+///
+/// Schema-version sanity check: refuses to operate on a DB whose
+/// `user_version` is greater than this binary supports. This is
+/// forward-only — it only fires when a *future* binary writes a
+/// higher version and the current binary then reads it. Today's
+/// downgrade path (newer binary → older binary on the same DB) is
+/// **not** protected by this check, because the older binary
+/// predates the check. Real downgrade protection lives in the
+/// separate `review-schema-downgrade-handling` spec.
 fn init_db(conn: &Connection) -> Result<()> {
-    let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    // Read as i64 first so a hand-mangled negative value surfaces
+    // as a friendly error instead of rusqlite's opaque "invalid type".
+    let version_raw: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version_raw < 0 {
+        anyhow::bail!(
+            "history DB has invalid user_version {version_raw}; \
+             remove {} to reset.",
+            db_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        );
+    }
+    let version = version_raw as u32;
+
+    if version > CURRENT_SCHEMA_VERSION {
+        anyhow::bail!(
+            "history DB schema v{version} is newer than this binary supports \
+             (v{CURRENT_SCHEMA_VERSION}). Upgrade portls or remove {} to reset.",
+            db_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        );
+    }
 
     if version < 1 {
         conn.execute_batch(
@@ -58,7 +93,24 @@ fn init_db(conn: &Connection) -> Result<()> {
         )?;
         conn.execute_batch("PRAGMA user_version = 1;")?;
     }
-    // Future: if version < 2 { ALTER TABLE ... }
+
+    if version < 2 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            PRAGMA user_version = 2;",
+        )?;
+    }
+
+    // Run on every open so a manually-deleted counter row is restored
+    // before `increment_counter` tries to UPDATE it. Idempotent; cheap.
+    conn.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES ('auto_prune_counter', '0')",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -470,5 +522,151 @@ pub fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / KB as f64)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_in_memory() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable fk");
+        conn
+    }
+
+    fn user_version(conn: &Connection) -> i64 {
+        conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read user_version")
+    }
+
+    fn counter_value(conn: &Connection) -> String {
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'auto_prune_counter'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("read counter")
+    }
+
+    #[test]
+    fn init_db_creates_meta_on_v2() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("init_db ok");
+        assert_eq!(user_version(&conn), 2);
+        assert_eq!(counter_value(&conn), "0");
+    }
+
+    #[test]
+    fn init_db_idempotent() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("first init");
+        init_db(&conn).expect("second init");
+        assert_eq!(user_version(&conn), 2);
+        assert_eq!(counter_value(&conn), "0");
+    }
+
+    #[test]
+    fn init_db_v1_to_v2_migrates_in_place_preserving_data() {
+        let conn = open_in_memory();
+        // Build a v1-shape DB by hand.
+        conn.execute_batch(
+            "CREATE TABLE snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                unix_ts INTEGER NOT NULL
+            );
+            CREATE TABLE ports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                port INTEGER NOT NULL,
+                protocol TEXT NOT NULL,
+                address TEXT NOT NULL,
+                pid INTEGER,
+                process_name TEXT,
+                container TEXT,
+                state TEXT,
+                remote_addr TEXT,
+                FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
+            );
+            PRAGMA user_version = 1;",
+        )
+        .expect("v1 schema");
+        // Seed one v1 snapshot + port row.
+        conn.execute(
+            "INSERT INTO snapshots (timestamp, unix_ts) VALUES ('2026-01-01T00:00:00Z', 1735689600)",
+            [],
+        )
+        .expect("seed snapshot");
+        let snap_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO ports (snapshot_id, port, protocol, address, pid, process_name, state)
+             VALUES (?1, 8080, 'tcp', '0.0.0.0', 1234, 'nginx', 'LISTEN')",
+            params![snap_id],
+        )
+        .expect("seed port");
+
+        init_db(&conn).expect("v1->v2 migration");
+
+        assert_eq!(user_version(&conn), 2);
+        assert_eq!(counter_value(&conn), "0");
+        // Pre-existing data must survive the migration.
+        let snap_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))
+            .expect("snapshots count");
+        assert_eq!(snap_count, 1);
+        let port_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ports", [], |r| r.get(0))
+            .expect("ports count");
+        assert_eq!(port_count, 1);
+        let proc_name: String = conn
+            .query_row("SELECT process_name FROM ports", [], |r| r.get(0))
+            .expect("port row");
+        assert_eq!(proc_name, "nginx");
+    }
+
+    #[test]
+    fn init_db_rejects_future_schema() {
+        let conn = open_in_memory();
+        conn.execute_batch("PRAGMA user_version = 99;")
+            .expect("set future version");
+        let err = init_db(&conn).expect_err("future schema must fail");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("newer than"),
+            "error should mention 'newer than': {msg}"
+        );
+    }
+
+    #[test]
+    fn init_db_rejects_negative_user_version() {
+        let conn = open_in_memory();
+        // PRAGMA user_version uses a 32-bit signed slot; -1 round-trips.
+        conn.execute_batch("PRAGMA user_version = -1;")
+            .expect("set negative");
+        let err = init_db(&conn).expect_err("negative version must fail");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("invalid"),
+            "error should mention 'invalid': {msg}"
+        );
+    }
+
+    #[test]
+    fn init_db_restores_deleted_counter_row() {
+        let conn = open_in_memory();
+        init_db(&conn).expect("first init");
+        conn.execute("DELETE FROM meta", [])
+            .expect("manual delete of meta row");
+        let missing: rusqlite::Result<String> = conn.query_row(
+            "SELECT value FROM meta WHERE key = 'auto_prune_counter'",
+            [],
+            |r| r.get(0),
+        );
+        assert!(missing.is_err(), "counter row must be missing first");
+
+        init_db(&conn).expect("second init restores row");
+        assert_eq!(counter_value(&conn), "0");
     }
 }
