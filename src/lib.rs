@@ -130,13 +130,15 @@ pub fn run(cli: Cli) -> Result<()> {
 fn run_interactive(cli: &Cli) -> Result<()> {
     use types::PortInfo;
 
-    let ports = if cli.connections {
+    // dialoguer drives a TTY: stderr warning would corrupt the prompt,
+    // so docker_status is dropped here on purpose.
+    let listing = if cli.connections {
         platform::get_connections()?
     } else {
         platform::get_listening_ports()?
     };
 
-    let mut ports = PortInfo::filter_protocol(ports, cli.protocol);
+    let mut ports = PortInfo::filter_protocol(listing.ports, cli.protocol);
     if cli.dev {
         filter::retain_dev_only(&mut ports);
     }

@@ -4,7 +4,22 @@ use colored::Colorize;
 use comfy_table::{Cell, Color, Table};
 
 use crate::ancestry::ProcessAncestry;
-use crate::types::PortInfo;
+use crate::types::{DockerStatus, PortInfo};
+
+/// Print a yellow stderr warning when the Docker daemon was probed and
+/// found unreachable. Silent for `Ok` and `NotQueried`.
+///
+/// Intentionally writes to stderr so `ports --json | jq` still works.
+/// `pub(crate)` so raw-mode TUI contexts (top, interactive) can't even
+/// reach for it — they call into `output::table` only via `print_ports*`,
+/// which no longer warn implicitly.
+pub(crate) fn print_warning(status: &DockerStatus) {
+    if let DockerStatus::Unreachable { reason } = status {
+        let line =
+            format!("warning: docker daemon unreachable ({reason}); container names omitted");
+        eprintln!("{}", line.yellow());
+    }
+}
 
 pub fn print_ports(ports: &[PortInfo]) {
     print_ports_inner(ports, &HashSet::new())

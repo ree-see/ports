@@ -12,7 +12,7 @@ use crate::framework;
 use crate::output::{json, table};
 use crate::platform;
 use crate::project;
-use crate::types::PortInfo;
+use crate::types::{DockerStatus, PortInfo};
 
 pub struct WatchOptions {
     pub interval: Duration,
@@ -28,18 +28,30 @@ pub struct WatchOptions {
 
 pub fn run(options: WatchOptions) -> Result<()> {
     let mut previous: HashSet<PortInfo> = HashSet::new();
+    // Track last printed docker status so we only emit the stderr
+    // warning on transitions, not every refresh tick. Otherwise an
+    // unreachable daemon spams a line per interval into scrollback
+    // (stderr is never cleared by `\x1B[2J`).
+    let mut previous_status: Option<DockerStatus> = None;
 
     loop {
         clear_screen();
         project::clear_cache();
         framework::clear_cache();
 
-        let ports = if options.connections {
+        let listing = if options.connections {
             platform::get_connections()?
         } else {
             platform::get_listening_ports()?
         };
-        let mut ports = PortInfo::filter_protocol(ports, options.protocol);
+        let docker_status = listing.docker_status;
+
+        if previous_status.as_ref() != Some(&docker_status) {
+            table::print_warning(&docker_status);
+            previous_status = Some(docker_status.clone());
+        }
+
+        let mut ports = PortInfo::filter_protocol(listing.ports, options.protocol);
         if options.dev {
             filter::retain_dev_only(&mut ports);
         }
@@ -53,12 +65,12 @@ pub fn run(options: WatchOptions) -> Result<()> {
                 .collect();
             let ancestry_map = ancestry::get_ancestry_batch(&pids_with_names);
             if options.json {
-                json::print_ports_why(&filtered, &ancestry_map);
+                json::print_ports_why(&filtered, &ancestry_map, &docker_status);
             } else {
                 table::print_ports_why(&filtered, &ancestry_map);
             }
         } else if options.json {
-            json::print_ports(&filtered);
+            json::print_ports(&filtered, &docker_status);
         } else {
             let new_ports: HashSet<&PortInfo> =
                 filtered.iter().filter(|p| !previous.contains(*p)).collect();

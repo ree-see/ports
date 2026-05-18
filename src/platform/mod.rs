@@ -5,7 +5,7 @@
 use anyhow::Result;
 
 use crate::framework;
-use crate::types::PortInfo;
+use crate::types::{DockerStatus, PortInfo};
 
 #[cfg(any(target_os = "linux", test))]
 pub mod linux;
@@ -14,6 +14,13 @@ pub mod linux;
 pub mod macos;
 
 mod fallback;
+
+/// A port enumeration result, including how reachable the Docker
+/// daemon was when enriching container names.
+pub struct PortListing {
+    pub ports: Vec<PortInfo>,
+    pub docker_status: DockerStatus,
+}
 
 fn resolve_services(mut ports: Vec<PortInfo>) -> Vec<PortInfo> {
     for p in &mut ports {
@@ -40,43 +47,45 @@ fn enrich_process_details(mut ports: Vec<PortInfo>) -> Vec<PortInfo> {
     ports
 }
 
+/// Run the full enrichment pipeline on a raw port vec.
+///
+/// Order is intentional: well-known service names first (cheap), then
+/// per-process details (PID-fanout), then Docker container names (cache
+/// hit fast, miss slow), then framework detection (consumes everything
+/// upstream). Docker is the only step that yields a status worth
+/// surfacing — the rest can't fail in a way users need to know about.
+fn enrich(ports: Vec<PortInfo>) -> PortListing {
+    let ports = resolve_services(ports);
+    let ports = enrich_process_details(ports);
+    let (ports, docker_status) = PortInfo::enrich_with_docker(ports);
+    let ports = framework::resolve_frameworks(ports);
+    PortListing {
+        ports,
+        docker_status,
+    }
+}
+
 #[cfg(target_os = "linux")]
-pub fn get_listening_ports() -> Result<Vec<PortInfo>> {
-    linux::get_listening_ports()
-        .map(resolve_services)
-        .map(enrich_process_details)
-        .map(PortInfo::enrich_with_docker)
-        .map(framework::resolve_frameworks)
+pub fn get_listening_ports() -> Result<PortListing> {
+    linux::get_listening_ports().map(enrich)
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn get_listening_ports() -> Result<Vec<PortInfo>> {
-    fallback::get_listening_ports()
-        .map(resolve_services)
-        .map(enrich_process_details)
-        .map(PortInfo::enrich_with_docker)
-        .map(framework::resolve_frameworks)
+pub fn get_listening_ports() -> Result<PortListing> {
+    fallback::get_listening_ports().map(enrich)
 }
 
 #[cfg(target_os = "linux")]
-pub fn get_connections() -> Result<Vec<PortInfo>> {
-    linux::get_established_connections()
-        .map(resolve_services)
-        .map(enrich_process_details)
-        .map(PortInfo::enrich_with_docker)
-        .map(framework::resolve_frameworks)
+pub fn get_connections() -> Result<PortListing> {
+    linux::get_established_connections().map(enrich)
 }
 
 #[cfg(target_os = "macos")]
-pub fn get_connections() -> Result<Vec<PortInfo>> {
-    macos::get_connections()
-        .map(resolve_services)
-        .map(enrich_process_details)
-        .map(PortInfo::enrich_with_docker)
-        .map(framework::resolve_frameworks)
+pub fn get_connections() -> Result<PortListing> {
+    macos::get_connections().map(enrich)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub fn get_connections() -> Result<Vec<PortInfo>> {
+pub fn get_connections() -> Result<PortListing> {
     anyhow::bail!("--connections is only supported on Linux and macOS")
 }

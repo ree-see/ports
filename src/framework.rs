@@ -337,7 +337,11 @@ mod tests {
                 image: Some("postgres:16-alpine".into()),
             },
         );
-        *docker::DOCKER_CACHE.lock().unwrap() = Some((std::time::Instant::now(), map));
+        *docker::DOCKER_CACHE.lock().unwrap() = Some((
+            std::time::Instant::now(),
+            map,
+            crate::types::DockerStatus::Ok,
+        ));
         assert_eq!(detect_docker_image(&info), Some("PostgreSQL".to_string()));
 
         // Sub-case 3: unknown image → returns "Docker".
@@ -350,7 +354,11 @@ mod tests {
                 image: Some("my-org/custom-thing:latest".into()),
             },
         );
-        *docker::DOCKER_CACHE.lock().unwrap() = Some((std::time::Instant::now(), map));
+        *docker::DOCKER_CACHE.lock().unwrap() = Some((
+            std::time::Instant::now(),
+            map,
+            crate::types::DockerStatus::Ok,
+        ));
         assert_eq!(detect_docker_image(&info), Some("Docker".to_string()));
 
         // Sub-case 4: container present, no cached image.

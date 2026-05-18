@@ -11,9 +11,11 @@ use crate::types::PortInfo;
 
 pub fn execute(target: &str, output_json: bool) -> Result<()> {
     // Fetch both listening ports and connections for maximum coverage.
-    let mut ports = platform::get_listening_ports()?;
+    // `ports why` has its own JSON shape (an array of WhyEntry) and does not
+    // surface docker_status today; adding it is tracked separately.
+    let mut ports = platform::get_listening_ports()?.ports;
     if let Ok(conns) = platform::get_connections() {
-        ports.extend(conns);
+        ports.extend(conns.ports);
     }
     // Auto-detect target type: try port number first, then PID, then name.
     let matches = if let Ok(port_num) = target.parse::<u16>() {

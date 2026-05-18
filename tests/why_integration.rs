@@ -62,12 +62,12 @@ fn test_why_flag_on_list_json() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should be valid JSON (array).
-    assert!(
-        stdout.trim().starts_with('['),
-        "Expected JSON array, got: {}",
-        stdout
-    );
+    // v0.6.0 wraps the array in an object that also exposes docker_status.
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("invalid JSON output");
+    let ports = parsed
+        .get("ports")
+        .expect("expected `ports` key in JSON wrapper");
+    assert!(ports.is_array(), "expected `ports` to be an array");
 }
 
 #[test]

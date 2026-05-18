@@ -29,7 +29,10 @@ fn test_dev_flag_json() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("invalid JSON output");
-    assert!(parsed.is_array(), "expected JSON array");
+    let ports = parsed
+        .get("ports")
+        .expect("expected `ports` key in JSON wrapper");
+    assert!(ports.is_array(), "expected `ports` to be an array");
 }
 
 #[test]

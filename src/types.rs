@@ -12,6 +12,46 @@ use crate::cli::{ProtocolFilter, SortField};
 #[cfg(feature = "docker")]
 use crate::docker;
 
+/// Reachability of the Docker daemon for the most recent enrichment pass.
+///
+/// Surfaced in JSON output (two flat fields: `docker_status` and
+/// `docker_reason`) and used by table output to decide whether to print
+/// a stderr warning. `NotQueried` means no `docker-proxy` process was
+/// observed and the daemon was never contacted.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+// With `docker` off the only construction site is the NotQueried
+// default — Ok and Unreachable are dormant but kept in the type so JSON
+// shape and downstream consumers stay stable across feature configs.
+#[cfg_attr(not(feature = "docker"), allow(dead_code))]
+pub enum DockerStatus {
+    #[default]
+    NotQueried,
+    Ok,
+    Unreachable {
+        reason: String,
+    },
+}
+
+impl DockerStatus {
+    /// Tag string used in JSON output's `docker_status` field.
+    pub fn as_tag(&self) -> &'static str {
+        match self {
+            DockerStatus::NotQueried => "not_queried",
+            DockerStatus::Ok => "ok",
+            DockerStatus::Unreachable { .. } => "unreachable",
+        }
+    }
+
+    /// Reason string for the JSON `docker_reason` field; `None` for
+    /// `Ok`/`NotQueried` so the field serializes as `null`.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            DockerStatus::Unreachable { reason } => Some(reason.as_str()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PortInfo {
     pub port: u16,
@@ -174,25 +214,26 @@ impl PortInfo {
         }
     }
 
-    /// Enrich ports with Docker container information.
+    /// Enrich ports with Docker container information, returning the
+    /// daemon reachability status alongside the populated ports.
     ///
     /// For ports forwarded by `docker-proxy`, adds the container name.
+    /// Returns `DockerStatus::NotQueried` when no `docker-proxy` is
+    /// observed (no daemon contact attempted), `Ok` on a successful
+    /// fetch, or `Unreachable { reason }` when the daemon could not
+    /// be reached.
     #[cfg(feature = "docker")]
-    pub fn enrich_with_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
-        // Only fetch Docker info if we have docker-proxy entries
+    pub fn enrich_with_docker(ports: Vec<PortInfo>) -> (Vec<PortInfo>, DockerStatus) {
         let has_docker_proxy = ports
             .iter()
             .any(|p| p.process_name.contains("docker-proxy"));
         if !has_docker_proxy {
-            return ports;
+            return (ports, DockerStatus::NotQueried);
         }
 
-        let mappings = docker::get_port_mappings();
-        if mappings.is_empty() {
-            return ports;
-        }
+        let (mappings, status) = docker::get_port_mappings();
 
-        ports
+        let enriched = ports
             .into_iter()
             .map(|mut p| {
                 if p.process_name.contains("docker-proxy") {
@@ -202,13 +243,15 @@ impl PortInfo {
                 }
                 p
             })
-            .collect()
+            .collect();
+
+        (enriched, status)
     }
 
     /// No-op when the `docker` feature is disabled.
     #[cfg(not(feature = "docker"))]
-    pub fn enrich_with_docker(ports: Vec<PortInfo>) -> Vec<PortInfo> {
-        ports
+    pub fn enrich_with_docker(ports: Vec<PortInfo>) -> (Vec<PortInfo>, DockerStatus) {
+        (ports, DockerStatus::NotQueried)
     }
 }
 
@@ -232,6 +275,34 @@ impl fmt::Display for Protocol {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn docker_status_default_is_not_queried() {
+        assert_eq!(DockerStatus::default(), DockerStatus::NotQueried);
+    }
+
+    #[test]
+    fn docker_status_as_tag() {
+        assert_eq!(DockerStatus::NotQueried.as_tag(), "not_queried");
+        assert_eq!(DockerStatus::Ok.as_tag(), "ok");
+        assert_eq!(
+            DockerStatus::Unreachable { reason: "x".into() }.as_tag(),
+            "unreachable"
+        );
+    }
+
+    #[test]
+    fn docker_status_reason() {
+        assert_eq!(DockerStatus::NotQueried.reason(), None);
+        assert_eq!(DockerStatus::Ok.reason(), None);
+        assert_eq!(
+            DockerStatus::Unreachable {
+                reason: "boom".into()
+            }
+            .reason(),
+            Some("boom"),
+        );
+    }
 
     fn make_port_info() -> PortInfo {
         PortInfo {

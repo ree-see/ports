@@ -76,10 +76,12 @@ pub fn record_snapshot(include_connections: bool) -> Result<RecordResult> {
     let conn = open_db()?;
     let now = Utc::now();
 
-    // Get current ports
-    let mut all_ports = platform::get_listening_ports()?;
+    // Get current ports. History records all observations and does not
+    // surface docker_status — per spec, the user's history view is about
+    // ports over time, not daemon reachability at the moment of capture.
+    let mut all_ports = platform::get_listening_ports()?.ports;
     if include_connections {
-        all_ports.extend(platform::get_connections()?);
+        all_ports.extend(platform::get_connections()?.ports);
     }
     // Insert snapshot
     conn.execute(

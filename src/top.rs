@@ -234,10 +234,15 @@ fn run_loop(
 fn fetch_ports(state: &TopState) -> Result<Vec<PortInfo>> {
     project::clear_cache();
     framework::clear_cache();
-    let mut ports = match state.mode {
+    // raw-mode TUI: never call table::print_warning here — stderr
+    // writes corrupt the ratatui alternate screen. docker_status is
+    // intentionally dropped; surfacing it would need a header line in
+    // the ratatui layout, which is tracked as a separate task.
+    let listing = match state.mode {
         ViewMode::Listening => platform::get_listening_ports()?,
         ViewMode::Connections => platform::get_connections()?,
     };
+    let mut ports = listing.ports;
     if state.dev {
         filter::retain_dev_only(&mut ports);
     }

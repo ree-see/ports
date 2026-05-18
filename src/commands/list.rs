@@ -15,13 +15,13 @@ pub fn execute(
     why: bool,
     dev: bool,
 ) -> Result<()> {
-    let ports = if connections {
+    let listing = if connections {
         platform::get_connections()?
     } else {
         platform::get_listening_ports()?
     };
-
-    let mut ports = PortInfo::filter_protocol(ports, protocol);
+    let docker_status = listing.docker_status;
+    let mut ports = PortInfo::filter_protocol(listing.ports, protocol);
     if dev {
         filter::retain_dev_only(&mut ports);
     }
@@ -34,13 +34,15 @@ pub fn execute(
             .collect();
         let ancestry_map = ancestry::get_ancestry_batch(&pids_with_names);
         if output_json {
-            json::print_ports_why(&ports, &ancestry_map);
+            json::print_ports_why(&ports, &ancestry_map, &docker_status);
         } else {
+            table::print_warning(&docker_status);
             table::print_ports_why(&ports, &ancestry_map);
         }
     } else if output_json {
-        json::print_ports(&ports);
+        json::print_ports(&ports, &docker_status);
     } else {
+        table::print_warning(&docker_status);
         table::print_ports(&ports);
     }
 

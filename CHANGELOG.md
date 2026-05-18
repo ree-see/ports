@@ -11,9 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cargo features gate the heaviest dependencies. Four features, all default-on, preserve `cargo install portls` behaviour: `docker` (`bollard`, `tokio`), `tui` (`ratatui`, `crossterm`, `dialoguer`), `history` (`rusqlite-bundled`, `chrono`), and `watch` (code-only gate, no extra deps). Install a slim binary with `cargo install portls --no-default-features` (drops Docker, the TUI, history, and watch mode — roughly a 54% release-binary size cut on macOS). Mix and match with `--features` for everything in between. Subcommands and flags whose feature is disabled return a clear runtime error instructing the user how to rebuild.
 - GitHub Actions CI workflow (`.github/workflows/ci.yml`) gating every push and pull request to `main`/`dev` on `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, and `cargo test --all-targets --locked`. Matrix runs on `ubuntu-latest` and `macos-latest` so Linux/macOS asymmetries surface before publish.
+- Docker daemon reachability is now surfaced. When `docker-proxy` listeners are observed but the daemon cannot be reached, table output prints a yellow `warning: docker daemon unreachable (...); container names omitted` line to stderr before the table. JSON output exposes the same signal as two flat fields (`docker_status`, `docker_reason`) so scripts can distinguish "no containers running" from "daemon down." Watch mode dedupes the warning on status transitions so the stderr stream stays quiet.
+- Failed Docker fetches now cache for 500 ms (vs the 3 s cache on success), so a recovering daemon is rediscovered on the next watch/top tick instead of after the full success window.
+- `DOCKER_HOST` URIs with embedded basic-auth credentials (e.g. `ssh://user:pass@host`) are redacted to `ssh://***@host` before the error chain hits stderr or JSON output.
 
 ### Changed
 
+- **BREAKING**: `ports --json` now emits an object `{"ports": [...], "docker_status": "ok" | "unreachable" | "not_queried", "docker_reason": null | "..."}` instead of a bare array. Scripts parsing `--json` must read `.ports` (e.g. `jq '.ports[]'` instead of `jq '.[]'`). The `--why --json` and `--json` flavours of `ports` and `ports <query>` all use the same wrapper; `ports why <target> --json` retains its existing array-of-`WhyEntry` shape.
 - **BREAKING**: `ports completions <shell>` now installs the completion file
   to the shell's standard user directory by default, instead of printing to
   stdout. Per-shell paths: fish to `~/.config/fish/completions/ports.fish`,
@@ -33,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Three distinct Docker failure modes (tokio runtime creation, bollard connect, `list_containers` query) used to collapse into an empty container map indistinguishable from "no containers running." They now each surface as a labelled `Unreachable { reason }` (`tokio runtime: ...`, `docker connect: ...`, `docker query: ...`).
 - Fish shell completions no longer mix listening-port subcommands with files and
   directories from the current working directory. Users with an existing
   `~/.config/fish/completions/ports.fish` should regenerate it after upgrading:

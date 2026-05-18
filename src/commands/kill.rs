@@ -11,9 +11,10 @@ use crate::platform;
 use crate::types::PortInfo;
 
 pub fn execute(target: &str, force: bool, all: bool, connections: bool) -> Result<()> {
-    let mut ports = platform::get_listening_ports()?;
+    // Kill drops docker_status — no output stage to display it.
+    let mut ports = platform::get_listening_ports()?.ports;
     if connections {
-        ports.extend(platform::get_connections()?);
+        ports.extend(platform::get_connections()?.ports);
         // Deduplicate by PID+port to avoid double-reporting
         ports.sort_by_key(|p| (p.pid, p.port));
         ports.dedup_by_key(|p| (p.pid, p.port));
